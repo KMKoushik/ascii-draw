@@ -104,16 +104,58 @@ export function fitCanvas(spec: Spec) {
   return { width, height };
 }
 
+// The canvas is unbounded in the editor, but stored coordinates start at 0. How far must
+// everything move right/down so nothing is negative?
+export function originShift(spec: Spec): Point {
+  let minX = 0;
+  let minY = 0;
+  const see = (x: number | undefined, y: number | undefined) => {
+    if (x !== undefined) minX = Math.min(minX, x);
+    if (y !== undefined) minY = Math.min(minY, y);
+  };
+  for (const box of spec.boxes ?? []) see(box.x ?? box.centerX, box.y);
+  for (const text of spec.texts ?? []) see(textX(text, spec.canvas.width), text.y);
+  for (const icon of spec.icons ?? []) see(icon.x, icon.y);
+  for (const arrow of spec.arrows ?? []) see(arrow.x, arrow.y);
+  for (const path of [...(spec.connectors ?? []), ...(spec.lines ?? [])]) {
+    for (const point of [...(path.points ?? []), ...(path.via ?? [])]) see(point[0], point[1]);
+    if (isPoint(path.from)) see(path.from[0], path.from[1]);
+    if (isPoint(path.to)) see(path.to[0], path.to[1]);
+  }
+  return [-minX, -minY];
+}
+
+export function shiftSpec(input: Spec, dx: number, dy: number): Spec {
+  if (!dx && !dy) return input;
+  const spec = structuredClone(input);
+  for (const box of spec.boxes ?? []) {
+    if (box.x !== undefined) box.x += dx;
+    if (box.centerX !== undefined) box.centerX += dx;
+    box.y += dy;
+  }
+  for (const text of spec.texts ?? []) {
+    if (text.x === undefined) { text.x = textX(text, spec.canvas.width) + dx; delete text.anchor; }
+    else text.x += dx;
+    text.y += dy;
+  }
+  for (const icon of spec.icons ?? []) { icon.x += dx; icon.y += dy; }
+  for (const arrow of spec.arrows ?? []) { arrow.x += dx; arrow.y += dy; }
+  for (const path of [...(spec.connectors ?? []), ...(spec.lines ?? [])]) shiftPath(path, dx, dy);
+  return spec;
+}
+
 // Produces a valid, self-consistent spec for a drawing edit, or throws the engine's error.
+// `shift` says how far content moved to keep coordinates non-negative, so views can compensate.
 export function finalize(input: Spec) {
-  const spec = normalize(input);
+  const shift = originShift(input);
+  const spec = normalize(shiftSpec(input, shift[0], shift[1]));
   const labels = spec.requiredLabels;
   delete spec.requiredLabels;
   spec.canvas = fitCanvas(spec);
   const result = validateSpec(spec);
   const kept = labels?.filter(label => result.diagram.text.includes(label));
   if (kept?.length) result.spec.requiredLabels = kept;
-  return result;
+  return { ...result, shift };
 }
 
 export function center(rect: Rect) {
@@ -258,14 +300,12 @@ export function selectionRect(g: Geometry, refs: ElementRef[]) {
   return unionRect(refs.map(ref => rectFor(g, ref)));
 }
 
-// Moves elements together; boxes carry everything drawn inside them.
+// Moves elements together; boxes carry everything drawn inside them. Coordinates may go
+// negative here; finalize() shifts the whole drawing back to the origin.
 export function translateGroup(origin: Spec, before: Geometry, refs: ElementRef[], dx: number, dy: number): Spec {
   const spec = structuredClone(origin);
   const sets = members(spec, before, refs);
-  const bounds = unionRect(kinds.flatMap(kind => [...sets[kind]].map(index => rectFor(before, { kind, index }))));
-  if (!bounds) return spec;
-  dx = Math.max(dx, -bounds.x);
-  dy = Math.max(dy, -bounds.y);
+  if (!kinds.some(kind => sets[kind].size)) return spec;
 
   const movedIds = new Set<string>();
   sets.box.forEach(i => { const box = spec.boxes![i]; box.x = (box.x ?? 0) + dx; box.y += dy; if (box.id) movedIds.add(box.id); });

@@ -43,11 +43,16 @@ export function measureFont(context: CanvasRenderingContext2D, size: number, lin
   return { size, cellWidth: metrics.width, ascent, rowHeight, advance: Math.max(1, rowHeight + lineSpacing) };
 }
 
-export function paintCells(context: CanvasRenderingContext2D, cells: Diagram["pngCells"], metrics: Metrics, originX: number, originY: number, foreground: string) {
+export type CellRange = { fromCol: number; toCol: number; fromRow: number; toRow: number };
+export function paintCells(context: CanvasRenderingContext2D, cells: Diagram["pngCells"], metrics: Metrics, originX: number, originY: number, foreground: string, range?: CellRange) {
   context.font = `${metrics.size}px "JetBrains Mono"`;
   context.textBaseline = "alphabetic";
-  for (let y = 0; y < cells.length; y++) {
-    for (let x = 0; x < cells[y].length; x++) {
+  const rowStart = Math.max(0, range?.fromRow ?? 0);
+  const rowEnd = Math.min(cells.length, range ? range.toRow + 1 : cells.length);
+  for (let y = rowStart; y < rowEnd; y++) {
+    const colStart = Math.max(0, range?.fromCol ?? 0);
+    const colEnd = Math.min(cells[y].length, range ? range.toCol + 1 : cells[y].length);
+    for (let x = colStart; x < colEnd; x++) {
       const cell = cells[y][x];
       if (cell.glyph === " ") continue;
       context.fillStyle = cell.color ?? foreground;
@@ -66,18 +71,25 @@ export function paintIcon(context: CanvasRenderingContext2D, image: HTMLImageEle
 
 // Rasterization is browser-native; the grid, routing, colors and icon reservations
 // come directly from the skill's shared engine. No server-side image is stored.
+const maxPixels = 16_000_000;
 export async function renderCanvas(spec: Spec, diagram: Diagram) {
   const size = spec.style?.pointSize ?? 24;
   await document.fonts.load(`${size}px "JetBrains Mono"`);
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");
   if (!context) throw new Error("This browser does not support canvas rendering");
-  const metrics = measureFont(context, size, spec.style?.lineSpacing ?? 2);
-  const margin = spec.style?.border ?? 48;
   const cells = diagram.pngCells;
-  canvas.width = Math.ceil((cells[0]?.length ?? 1) * metrics.cellWidth + 2 * margin);
-  canvas.height = Math.ceil((cells.length - 1) * metrics.advance + metrics.rowHeight + 2 * margin);
-  if (canvas.width * canvas.height > 16_000_000) throw new Error("Rendered image exceeds 16 megapixels");
+  const measure = (scale: number) => {
+    const metrics = measureFont(context, Math.max(4, size * scale), (spec.style?.lineSpacing ?? 2) * scale);
+    const margin = (spec.style?.border ?? 48) * scale;
+    return { metrics, margin, width: Math.ceil((cells[0]?.length ?? 1) * metrics.cellWidth + 2 * margin), height: Math.ceil((cells.length - 1) * metrics.advance + metrics.rowHeight + 2 * margin) };
+  };
+  // Very large drawings export at a smaller font so the PNG stays within 16 megapixels.
+  let layout = measure(1);
+  if (layout.width * layout.height > maxPixels) layout = measure(Math.sqrt(maxPixels / (layout.width * layout.height)) * 0.98);
+  const { metrics, margin } = layout;
+  canvas.width = layout.width;
+  canvas.height = layout.height;
   context.fillStyle = spec.style?.background ?? "#000000";
   context.fillRect(0, 0, canvas.width, canvas.height);
   paintCells(context, cells, metrics, margin, margin, spec.style?.foreground ?? "#f2f2f2");

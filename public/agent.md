@@ -38,6 +38,6 @@ curl -X PUT "https://ascii-diagram.kdawg.dev/api/diagrams/<id>?token=<token>" \
 
 `title` is optional; omit it to keep the current title. HTTP 200 returns the same fields as publishing. HTTP 404 means the link is wrong, expired, or revoked. Give the user the same link again.
 
-Limits: 256 KiB request body, 240 × 140 cells, 16 megapixels, 30 shares or updates per minute per IP.
+Limits: 256 KiB request body, 600 × 300 cells, 30 shares or updates per minute per IP.
 
 Icons: use the skill's semantic shortcut IDs (for example `agent` or `datastore`) or any Tabler 3.46.0 ID such as `outline/browser` or `filled/heart`. Skip the skill's icon-fetch step; the app bundles the full catalog.

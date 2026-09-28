@@ -8,9 +8,11 @@ async function grid(page: Page) {
   await expect(canvas).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
   await page.waitForTimeout(50);
-  const box = (await canvas.boundingBox())!;
+  const canvasBox = (await canvas.boundingBox())!;
   const cw = Number(await canvas.getAttribute("data-cell-width"));
   const rh = Number(await canvas.getAttribute("data-row-height"));
+  // Screen position of grid cell 0,0 (the canvas pans, so it isn't the element's corner).
+  const box = { x: canvasBox.x + Number(await canvas.getAttribute("data-origin-x")), y: canvasBox.y + Number(await canvas.getAttribute("data-origin-y")) };
   const at = ([c, r]: Cell): Cell => [box.x + (c + 0.5) * cw, box.y + (r + 0.5) * rh];
   return {
     box, cw, rh, at,
@@ -263,7 +265,8 @@ test("typing never scrolls the canvas; labels land where clicked", async ({ page
   await page.getByRole("button", { name: "Clear" }).click();
   const canvas = page.getByLabel("Drawing canvas");
   await page.evaluate(() => document.fonts.ready);
-  const b = (await canvas.boundingBox())!;
+  const bb = (await canvas.boundingBox())!;
+  const b = { x: bb.x + Number(await canvas.getAttribute("data-origin-x")), y: bb.y + Number(await canvas.getAttribute("data-origin-y")) };
   const cw = +(await canvas.getAttribute("data-cell-width"))!, rh = +(await canvas.getAttribute("data-row-height"))!;
   const at = (c: number, r: number): [number, number] => [b.x + (c + .5) * cw, b.y + (r + .5) * rh];
   await page.getByRole("button", { name: "Box", exact: true }).click();
@@ -276,7 +279,8 @@ test("typing never scrolls the canvas; labels land where clicked", async ({ page
   await page.mouse.click(...at(40, 4));
   await page.keyboard.type("free label");
   await page.waitForTimeout(80);
-  expect(await page.locator(".draw-scroll").evaluate(e => e.scrollTop)).toBe(0);
+  expect(Number(await canvas.getAttribute("data-origin-y"))).toBe(b.y - bb.y);
+  expect(await page.evaluate(() => scrollY)).toBe(0);
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "JSON", exact: true }).click();
   const spec = JSON.parse(await page.getByRole("textbox", { name: "Diagram JSON" }).inputValue());
@@ -288,10 +292,11 @@ test("editing never shifts the page; Home/End move within the line", async ({ pa
   const canvas = page.getByLabel("Drawing canvas");
   await canvas.waitFor();
   await page.evaluate(() => document.fonts.ready);
-  const b = (await canvas.boundingBox())!;
+  const bb = (await canvas.boundingBox())!;
+  const b = { x: bb.x + Number(await canvas.getAttribute("data-origin-x")), y: bb.y + Number(await canvas.getAttribute("data-origin-y")) };
   const cw = +(await canvas.getAttribute("data-cell-width"))!, rh = +(await canvas.getAttribute("data-row-height"))!;
   const at = (c: number, r: number): [number, number] => [b.x + (c + .5) * cw, b.y + (r + .5) * rh];
-  const top = async () => (await canvas.boundingBox())!.y;
+  const top = async () => (await canvas.boundingBox())!.y + Number(await canvas.getAttribute("data-origin-y"));
   await page.mouse.dblclick(...at(10, 8)); await page.keyboard.press("End"); await page.keyboard.type(" now"); await page.keyboard.press("Escape");
   await page.mouse.dblclick(...at(58, 6)); await page.keyboard.press("End"); await page.keyboard.type(" 2"); await page.keyboard.press("Escape");
   expect(await top()).toBe(b.y);
@@ -302,8 +307,7 @@ test("editing never shifts the page; Home/End move within the line", async ({ pa
   expect(spec.texts).toContainEqual(expect.objectContaining({ x: 80, y: 3, value: "typed on canvas" }));
   expect(spec.boxes[1].title).toBe("WORKER 2");
   await page.getByRole("button", { name: "Draw", exact: true }).click();
-  const g = (await page.getByLabel("Drawing canvas").boundingBox())!;
-  await page.mouse.dblclick(g.x + (80.5 + 3) * cw, g.y + 3.5 * rh);
+  await page.mouse.dblclick(b.x + (80.5 + 3) * cw, b.y + 3.5 * rh);
   await page.keyboard.press("Home");
   await page.keyboard.type("> ");
   await page.keyboard.press("Shift+End");
@@ -404,4 +408,90 @@ test("drawing on an opened link autosaves to the same link", async ({ page }) =>
   const stored = await (await page.request.get(created.url.replace("/d/", "/api/diagrams/"))).json();
   expect(stored.spec.boxes.map((b: { title: string }) => b.title)).toContain("ADDED LIVE");
   expect(page.url()).toBe(created.url);
+});
+
+async function origin(page: Page) {
+  const canvas = page.getByLabel("Drawing canvas");
+  return { x: Number(await canvas.getAttribute("data-origin-x")), y: Number(await canvas.getAttribute("data-origin-y")), cw: Number(await canvas.getAttribute("data-cell-width")) };
+}
+
+test("the canvas is unbounded: scroll pans, and you can draw far from the start", async ({ page }) => {
+  const g = await blank(page);
+  const start = await origin(page);
+  await page.mouse.move(...g.at([20, 10]));
+  await page.mouse.wheel(3000, 1200);
+  await expect.poll(async () => (await origin(page)).x).toBe(start.x - 3000);
+  expect((await origin(page)).y).toBe(start.y - 1200);
+  const far = await grid(page);
+  const col = Math.round((3000 + 200) / far.cw);
+  const row = Math.round((1200 + 200) / far.rh);
+  await drawBox(page, far, [col, row], [col + 16, row + 4], "FAR AWAY");
+  const spec = await currentSpec(page);
+  expect(spec.boxes[0]).toMatchObject({ title: "FAR AWAY", x: col, y: row });
+  expect(spec.canvas.width).toBeGreaterThan(240);
+});
+
+test("drawing left of and above the origin shifts the drawing without moving it on screen", async ({ page }) => {
+  const g = await blank(page);
+  await drawBox(page, g, [2, 2], [14, 6], "A");
+  await page.mouse.move(...g.at([10, 10]));
+  await page.mouse.wheel(-400, -200);
+  const panned = await grid(page);
+  const target: Cell = [-12, -4];
+  const screen = panned.at(target);
+  await drawBox(page, panned, target, [-4, 0], "B");
+  const after = await grid(page);
+  // Cell 0,0 is now where -12,-4 was, so B stayed exactly where it was drawn.
+  expect(after.at([0, 0])[0]).toBeCloseTo(screen[0], 0);
+  expect(after.at([0, 0])[1]).toBeCloseTo(screen[1], 0);
+  const spec = await currentSpec(page);
+  const byTitle = (title: string) => spec.boxes.find((b: { title: string }) => b.title === title);
+  expect(byTitle("B")).toMatchObject({ x: 0, y: 0 });
+  expect(byTitle("A")).toMatchObject({ x: 14, y: 6 });
+});
+
+test("space-drag and the hand tool pan; ctrl-scroll zooms around the cursor; Shift+1 fits", async ({ page }) => {
+  const g = await blank(page);
+  await drawBox(page, g, [2, 2], [14, 6], "A");
+  const before = await origin(page);
+  await page.mouse.move(...g.at([30, 20]));
+  await page.keyboard.down(" ");
+  await page.mouse.down();
+  await page.mouse.move(g.at([30, 20])[0] + 150, g.at([30, 20])[1] + 80, { steps: 5 });
+  await page.mouse.up();
+  await page.keyboard.up(" ");
+  let now = await origin(page);
+  expect([now.x - before.x, now.y - before.y]).toEqual([150, 80]);
+  expect(await currentSpec(page)).toMatchObject({ boxes: [expect.objectContaining({ x: 2, y: 2 })] });
+
+  await page.getByRole("button", { name: "Hand", exact: true }).click();
+  const g2 = await grid(page);
+  const from = await origin(page);
+  await g2.drag([40, 20], [30, 15]);
+  now = await origin(page);
+  expect(now.x).toBeLessThan(from.x);
+  await expect(page.getByText(/selected/)).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  const g3 = await grid(page);
+  const anchor = g3.at([8, 4]);
+  await page.mouse.move(...anchor);
+  await page.keyboard.down("Control");
+  await page.mouse.wheel(0, -300);
+  await page.keyboard.up("Control");
+  const zoomed = await grid(page);
+  expect(zoomed.cw).toBeGreaterThan(g3.cw);
+  const cellUnder = [(anchor[0] - zoomed.box.x) / zoomed.cw, (anchor[1] - zoomed.box.y) / zoomed.rh];
+  expect(cellUnder[0]).toBeCloseTo(8.5, 0);
+  expect(cellUnder[1]).toBeCloseTo(4.5, 0);
+
+  await page.mouse.wheel(5000, 5000);
+  await page.keyboard.press("Shift+Digit1");
+  const fitted = await grid(page);
+  const canvasBox = (await page.getByLabel("Drawing canvas").boundingBox())!;
+  const [bx, by] = fitted.at([8, 4]);
+  expect(bx).toBeGreaterThan(canvasBox.x);
+  expect(bx).toBeLessThan(canvasBox.x + canvasBox.width);
+  expect(by).toBeGreaterThan(canvasBox.y);
+  expect(by).toBeLessThan(canvasBox.y + canvasBox.height);
 });

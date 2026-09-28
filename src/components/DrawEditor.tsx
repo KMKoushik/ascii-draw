@@ -4,7 +4,7 @@ import type { Diagram } from "../../shared/engine.js";
 import type { Spec } from "../../shared/spec";
 import {
   autoPorts, boxAt, emptySpec, finalize, friendlyError, geometry, hitTest, isEmpty, isMovable, nextBoxId, normalize,
-  rectFor, removeElements, requiredBoxSize, translateGroup, duplicateElements, inMarquee, allElements, selectionRect,
+  rectFor, removeElements, requiredBoxSize, translateGroup, duplicateElements, inMarquee, allElements, selectionRect, originShift, shiftSpec,
   type ElementRef, type Geometry, type Point, type Rect,
 } from "../../shared/geometry";
 import { loadIcon, loadedIcon, measureFont, paintCells, paintIcon } from "../lib/render";
@@ -15,26 +15,35 @@ import {
 import { displayWidth } from "../../shared/engine.js";
 import { Inspector } from "./Inspector";
 
-export type Tool = "select" | "box" | "arrow" | "text" | "icon";
+export type Tool = "select" | "hand" | "box" | "arrow" | "text" | "icon";
 export const palette = ["#e8e8e5", "#79bdff", "#ffd15b", "#b7e3a1", "#ff9d91", "#c4a7ff", "#7fdbca", "#929da7"];
 
 const tools: { id: Tool; label: string; key: string; glyph: string; hint: string }[] = [
-  { id: "select", label: "Select", key: "V", glyph: "↖", hint: "Drag empty space to select many. Shift-click adds. Double-click to write. Alt skips snapping." },
+  { id: "select", label: "Select", key: "V", glyph: "↖", hint: "Drag empty space to select many. Double-click to write. Scroll or Space-drag to pan, pinch to zoom." },
+  { id: "hand", label: "Hand", key: "H", glyph: "✥", hint: "Drag to move around. Scroll, or hold Space and drag, from any tool." },
   { id: "box", label: "Box", key: "R", glyph: "▭", hint: "Drag to draw a box, then type its title." },
   { id: "arrow", label: "Arrow", key: "A", glyph: "→", hint: "Drag from one box to another." },
   { id: "text", label: "Text", key: "T", glyph: "T", hint: "Click anywhere and type. Click in a box to write inside it." },
   { id: "icon", label: "Icon", key: "I", glyph: "◇", hint: "Click to place an icon." },
 ];
-const toolKeys: Record<string, Tool> = { v: "select", r: "box", a: "arrow", t: "text", i: "icon", "1": "select", "2": "box", "3": "arrow", "4": "text", "5": "icon" };
+const toolKeys: Record<string, Tool> = { v: "select", h: "hand", r: "box", a: "arrow", t: "text", i: "icon", "1": "select", "2": "box", "3": "arrow", "4": "text", "5": "icon" };
 const baseSize = 16;
-const zoomSteps = [0.5, 0.67, 0.8, 1, 1.25, 1.5, 2];
+const zoomSteps = [0.25, 0.33, 0.5, 0.67, 0.8, 1, 1.25, 1.5, 2, 3];
+const minZoom = zoomSteps[0];
+const maxZoom = zoomSteps.at(-1)!;
+// Where grid cell 0,0 sits on screen before any panning: clear of the floating toolbar.
+const homeCamera = { x: -16, y: -60 };
+const clampZoom = (value: number) => Math.min(maxZoom, Math.max(minZoom, value));
 const emptyDiagram: Diagram = { text: "", cells: [], pngCells: [], icons: [] };
 
 type Handle = "nw" | "ne" | "sw" | "se";
-type View = { spec: Spec; diagram: Diagram };
+// shift: how far a preview moved content to keep coordinates non-negative (drawn back in place).
+type View = { spec: Spec; diagram: Diagram; shift?: Point };
+type Camera = { x: number; y: number };
 type Drag =
   | { type: "move"; start: Point; origin: Spec; before: Geometry; refs: ElementRef[]; clicked: ElementRef; narrow: boolean; candidate?: Spec }
   | { type: "marquee"; start: Point; current: Point; base: ElementRef[] }
+  | { type: "pan"; startX: number; startY: number; camera: Camera }
   | { type: "resize"; start: Point; origin: Spec; before: Geometry; ref: ElementRef; handle: Handle; candidate?: Spec }
   | { type: "box"; start: Point; current: Point }
   | { type: "arrow"; start: Point; startBox: number; current: Point; candidate?: Spec };
@@ -96,7 +105,16 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
   const editSeq = useRef(0);
   const drag = useRef<Drag | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const areaRef = useRef<HTMLDivElement>(null);
+  // The canvas is a viewport over an unbounded grid; the camera is the doc-pixel offset of its top-left.
+  const [camera, setCamera] = useState<Camera>(homeCamera);
+  const cameraRef = useRef(camera);
+  cameraRef.current = camera;
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const spaceRef = useRef(false);
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  const measureContext = useRef<CanvasRenderingContext2D | null>(null);
   const messageTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const view = preview ?? base;
@@ -106,22 +124,42 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
   }, [preview, docGeometry]);
 
   useEffect(() => { void document.fonts.load(`${baseSize}px "JetBrains Mono"`).then(() => setFontReady(true)); }, []);
-  const metrics = useMemo(() => {
-    const context = document.createElement("canvas").getContext("2d")!;
-    return measureFont(context, baseSize * zoom, Math.round(2 * zoom));
-    // fontReady re-measures once JetBrains Mono has loaded.
-  }, [zoom, fontReady]); // eslint-disable-line react-hooks/exhaustive-deps
+  const measureAt = useCallback((level: number) => {
+    measureContext.current ??= document.createElement("canvas").getContext("2d")!;
+    return measureFont(measureContext.current, baseSize * level, Math.round(2 * level));
+  }, []);
+  // fontReady re-measures once JetBrains Mono has loaded.
+  const metrics = useMemo(() => measureAt(zoom), [zoom, fontReady, measureAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  const metricsRef = useRef(metrics);
+  metricsRef.current = metrics;
   const [area, setArea] = useState({ width: 0, height: 0 });
   useEffect(() => {
-    const element = scrollRef.current;
+    const element = areaRef.current;
     if (!element) return;
     const observer = new ResizeObserver(() => setArea({ width: element.clientWidth, height: element.clientHeight }));
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
-  // The grid fills the visible area; 32 and 116 are the canvas margins in styles.css.
-  const cols = Math.max(view.spec.canvas.width + 40, 120, Math.floor((area.width - 32) / metrics.cellWidth));
-  const rows = Math.max(view.spec.canvas.height + 16, 44, Math.floor((area.height - 116) / metrics.advance));
+
+  // Keep the visible grid still when content shifts to stay at non-negative coordinates.
+  const moveCamera = useCallback(([dx, dy]: Point) => {
+    if (!dx && !dy) return;
+    const { cellWidth, advance } = metricsRef.current;
+    setCamera(current => ({ x: current.x + dx * cellWidth, y: current.y + dy * advance }));
+  }, []);
+
+  // Zooms so the grid point under `anchor` (canvas pixels) stays put.
+  const zoomAt = useCallback((level: number, anchor?: Point) => {
+    const next = clampZoom(level);
+    const before = metricsRef.current;
+    const after = measureAt(next);
+    const [ax, ay] = anchor ?? [areaRef.current!.clientWidth / 2, areaRef.current!.clientHeight / 2];
+    setCamera(current => ({
+      x: ((ax + current.x) / before.cellWidth) * after.cellWidth - ax,
+      y: ((ay + current.y) / before.advance) * after.advance - ay,
+    }));
+    setZoom(next);
+  }, [measureAt]);
 
   useEffect(() => {
     if (!docGeometry) return;
@@ -141,13 +179,23 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
   const commit = useCallback((next: Spec, mergeKey?: string) => {
     if (isEmpty(next)) { onCommit(null, mergeKey); return true; }
     try {
-      onCommit(finalize(next).spec, mergeKey);
+      const result = finalize(next);
+      moveCamera(result.shift);
+      onCommit(result.spec, mergeKey);
       return true;
     } catch (error) {
       flash(friendlyError(error));
       return false;
     }
-  }, [onCommit, flash]);
+  }, [onCommit, flash, moveCamera]);
+
+  // New content left of or above the origin: shift the drawing first (and the camera with it)
+  // so edits in progress always use valid coordinates.
+  function atOrigin(spec: Spec) {
+    const shift = originShift(spec);
+    moveCamera(shift);
+    return shiftSpec(spec, shift[0], shift[1]);
+  }
 
   const tryView = (next: Spec): View | null => attempt(next).view;
   function attempt(next: Spec): { view: View | null; error?: string } {
@@ -224,9 +272,10 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
       startEdit({ kind: cell[1] === docGeometry.boxes[box].y ? "title" : "body", index: box, origin: doc });
       return;
     }
-    const origin = structuredClone(doc);
-    origin.texts = [...(origin.texts ?? []), { x: cell[0], y: cell[1], value: "", color }];
-    startEdit({ kind: "text", index: origin.texts.length - 1, origin }, 0);
+    const draft = structuredClone(doc);
+    draft.texts = [...(draft.texts ?? []), { x: cell[0], y: cell[1], value: "", color }];
+    const origin = atOrigin(draft);
+    startEdit({ kind: "text", index: origin.texts!.length - 1, origin }, 0);
   }
 
   useLayoutEffect(() => {
@@ -249,20 +298,40 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
     if (!canvas) return;
     const { cellWidth: cw, advance: ah } = metrics;
     const dpr = window.devicePixelRatio || 1;
-    const width = Math.ceil(cols * cw);
-    const height = Math.ceil(rows * ah);
-    canvas.width = Math.round(width * dpr);
-    canvas.height = Math.round(height * dpr);
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
+    const width = Math.max(1, area.width);
+    const height = Math.max(1, area.height);
+    if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(height * dpr);
+    }
     const context = canvas.getContext("2d")!;
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
     context.fillStyle = view.spec.style?.background ?? "#000000";
     context.fillRect(0, 0, width, height);
-    context.fillStyle = "#1c252c";
-    for (let r = 0; r <= rows; r++) for (let c = 0; c <= cols; c++) context.fillRect(Math.round(c * cw), Math.round(r * ah), 1, 1);
 
-    paintCells(context, view.diagram.pngCells, metrics, 0, 0, view.spec.style?.foreground ?? "#f2f2f2");
+    // Grid coordinates are drawn through the camera. Doc overlays (ghosts, guides) use the
+    // document's coordinates; the rendered view may be a preview shifted by `view.shift`.
+    const [sx, sy] = view.shift ?? [0, 0];
+    const docSpace = () => context.setTransform(dpr, 0, 0, dpr, -camera.x * dpr, -camera.y * dpr);
+    const viewSpace = () => context.setTransform(dpr, 0, 0, dpr, (-camera.x - sx * cw) * dpr, (-camera.y - sy * ah) * dpr);
+
+    docSpace();
+    {
+      // Thin the dots when zoomed out so they stay about 8px apart.
+      const strideX = Math.max(1, Math.ceil(8 / cw));
+      const strideY = Math.max(1, Math.ceil(8 / ah));
+      context.fillStyle = "#1c252c";
+      const c0 = Math.floor(camera.x / cw / strideX) * strideX, c1 = Math.ceil((camera.x + width) / cw);
+      const r0 = Math.floor(camera.y / ah / strideY) * strideY, r1 = Math.ceil((camera.y + height) / ah);
+      for (let r = r0; r <= r1; r += strideY) for (let c = c0; c <= c1; c += strideX) context.fillRect(Math.round(c * cw), Math.round(r * ah), 1, 1);
+    }
+
+    viewSpace();
+    const range = {
+      fromCol: Math.floor(camera.x / cw) + sx - 1, toCol: Math.ceil((camera.x + width) / cw) + sx + 1,
+      fromRow: Math.floor(camera.y / ah) + sy - 1, toRow: Math.ceil((camera.y + height) / ah) + sy + 1,
+    };
+    paintCells(context, view.diagram.pngCells, metrics, 0, 0, view.spec.style?.foreground ?? "#f2f2f2", range);
     for (const icon of view.diagram.icons) {
       const image = loadedIcon(icon.id, icon.color);
       if (image) paintIcon(context, image, icon, metrics, 0, 0);
@@ -313,6 +382,7 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
         }
       }
     }
+    docSpace();
     if (ghost?.rect && ghost.marquee) {
       context.fillStyle = "rgba(121, 189, 255, 0.08)";
       context.fillRect(ghost.rect.x * cw, ghost.rect.y * ah, ghost.rect.width * cw, ghost.rect.height * ah);
@@ -320,6 +390,7 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
     } else if (ghost?.rect) box(ghost.rect, ghost.invalid ? "#ff9d91" : "#79bdff", [4, 3]);
     if (ghost?.path) fillPath(ghost.path, ghost.invalid ? "rgba(255, 157, 145, 0.25)" : "rgba(121, 189, 255, 0.2)");
 
+    viewSpace();
     if (editing && g) {
       const starts = lineStarts(editing, editing.value, g);
       if (editing.kind === "text" && starts.length) {
@@ -337,6 +408,7 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
       }
     }
 
+    docSpace();
     if (guides.length) {
       context.save();
       context.strokeStyle = "#ff9d91";
@@ -358,16 +430,13 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
       const bottom = (rect.y + rect.height) * ah + 2.5;
       return [handle.includes("w") ? left : right, handle.includes("n") ? top : bottom];
     }
-  }, [view, viewGeometry, metrics, cols, rows, hover, selected, selection, ghost, iconTick, editing, caretOn, guides]);
+  }, [view, viewGeometry, metrics, area, camera, hover, selected, selection, ghost, iconTick, editing, caretOn, guides]);
 
   function pointer(event: React.PointerEvent | React.MouseEvent) {
     const rect = canvasRef.current!.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    const cell: Point = [
-      Math.min(cols - 1, Math.max(0, Math.floor(x / metrics.cellWidth))),
-      Math.min(rows - 1, Math.max(0, Math.floor(y / metrics.advance))),
-    ];
+    const x = event.clientX - rect.left + cameraRef.current.x;
+    const y = event.clientY - rect.top + cameraRef.current.y;
+    const cell: Point = [Math.floor(x / metrics.cellWidth), Math.floor(y / metrics.advance)];
     return { cell, x, y };
   }
 
@@ -400,8 +469,8 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
     const min = requiredBoxSize(target);
     const width = Math.max(min.width, d.handle.includes("w") ? rect.width - dx : rect.width + dx);
     const height = Math.max(min.height, d.handle.includes("n") ? rect.height - dy : rect.height + dy);
-    target.x = d.handle.includes("w") ? Math.max(0, rect.x + rect.width - width) : rect.x;
-    target.y = d.handle.includes("n") ? Math.max(0, rect.y + rect.height - height) : rect.y;
+    target.x = d.handle.includes("w") ? rect.x + rect.width - width : rect.x;
+    target.y = d.handle.includes("n") ? rect.y + rect.height - height : rect.y;
     target.width = width;
     target.height = height;
     return next;
@@ -438,7 +507,7 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
   function candidateRect(d: Extract<Drag, { type: "move" | "resize" }>, cell: Point, dx: number, dy: number): Rect | null {
     if (d.type === "move") {
       const rect = selectionRect(d.before, d.refs);
-      return rect && { ...rect, x: Math.max(0, rect.x + dx), y: Math.max(0, rect.y + dy) };
+      return rect && { ...rect, x: rect.x + dx, y: rect.y + dy };
     }
     const rect = rectFor(d.before, d.ref);
     if (!rect) return null;
@@ -454,6 +523,14 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
   }
 
   function onPointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
+    // Middle button, the Hand tool, or holding Space pans the canvas.
+    if (event.button === 1 || (event.button === 0 && (tool === "hand" || spaceRef.current))) {
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      drag.current = { type: "pan", startX: event.clientX, startY: event.clientY, camera: cameraRef.current };
+      setCursor("grabbing");
+      return;
+    }
     if (event.button !== 0 || !docGeometry) return;
     event.preventDefault();
     if (editingRef.current) { finishEdit(); event.currentTarget.focus({ preventScroll: true }); return; }
@@ -501,10 +578,15 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
   }
 
   function onPointerMove(event: React.PointerEvent<HTMLCanvasElement>) {
+    const d = drag.current;
+    if (d?.type === "pan") {
+      setCamera({ x: d.camera.x - (event.clientX - d.startX), y: d.camera.y - (event.clientY - d.startY) });
+      return;
+    }
     if (!docGeometry) return;
     const { cell, x, y } = pointer(event);
-    const d = drag.current;
     if (!d) {
+      if (tool === "hand" || spaceRef.current) { setCursor("grab"); setHover(null); return; }
       if (tool !== "select") { setCursor("crosshair"); setHover(null); return; }
       const handle = handleAt(x, y);
       if (handle) { setCursor(handle === "nw" || handle === "se" ? "nwse-resize" : "nesw-resize"); return; }
@@ -566,6 +648,7 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
     setGhost(null);
     setGuides([]);
     if (!d) return;
+    if (d.type === "pan") { setCursor(tool === "hand" || spaceRef.current ? "grab" : "default"); return; }
     if (d.type === "marquee") return;
     if (d.type === "move" && !d.candidate) {
       // A plain click on one member of a group narrows the selection to it.
@@ -589,7 +672,7 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
     next.boxes = [...(next.boxes ?? []), { id: nextBoxId(doc), ...rect, color }];
     const check = attempt(next);
     if (!check.view) { flash(check.error ?? "That box doesn’t fit there."); return; }
-    startEdit({ kind: "title", index: next.boxes.length - 1, origin: normalize(next) });
+    startEdit({ kind: "title", index: next.boxes.length - 1, origin: normalize(atOrigin(next)) });
   }
 
   function onPointerCancel() {
@@ -643,6 +726,16 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
       const mod = event.metaKey || event.ctrlKey;
       const key = event.key.toLowerCase();
       if (target === canvasRef.current && [" ", "Home", "End", "PageUp", "PageDown"].includes(event.key)) event.preventDefault();
+      if (event.key === " ") {
+        event.preventDefault();
+        if (!spaceRef.current) { spaceRef.current = true; setSpaceHeld(true); if (!drag.current) setCursor("grab"); }
+        return;
+      }
+      if (event.shiftKey && event.code === "Digit1" && !mod) { event.preventDefault(); fit(); return; }
+      if (event.shiftKey && event.code === "Digit0" && !mod) { event.preventDefault(); zoomAt(1); return; }
+      if (mod && (event.key === "=" || event.key === "+")) { event.preventDefault(); zoomBy(1); return; }
+      if (mod && event.key === "-") { event.preventDefault(); zoomBy(-1); return; }
+      if (mod && event.key === "0") { event.preventDefault(); zoomAt(1); return; }
       if (mod && key === "z") { event.preventDefault(); if (event.shiftKey) onRedo(); else onUndo(); return; }
       if (mod && key === "y") { event.preventDefault(); onRedo(); return; }
       if (mod && key === "d") { event.preventDefault(); duplicate(); return; }
@@ -667,24 +760,53 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
       }
       if (toolKeys[key]) { setTool(toolKeys[key]); if (toolKeys[key] !== "select") setSelection(null); }
     }
+    function onKeyUp(event: KeyboardEvent) {
+      if (event.key !== " " || !spaceRef.current) return;
+      spaceRef.current = false;
+      setSpaceHeld(false);
+      if (drag.current?.type !== "pan") setCursor("default");
+    }
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selected, selection, doc, docGeometry, commit, remove, duplicate, onUndo, onRedo]);
+    window.addEventListener("keyup", onKeyUp);
+    return () => { window.removeEventListener("keydown", onKeyDown); window.removeEventListener("keyup", onKeyUp); };
+  }, [selected, selection, doc, docGeometry, commit, remove, duplicate, onUndo, onRedo]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Scrolling pans (Shift for sideways on a mouse wheel); pinch or ⌘/Ctrl+scroll zooms at the cursor.
   useEffect(() => {
-    const element = scrollRef.current;
+    const element = canvasRef.current;
     if (!element) return;
     function onWheel(event: WheelEvent) {
-      if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
-      setZoom(current => {
-        const i = zoomSteps.indexOf(current);
-        return zoomSteps[Math.max(0, Math.min(zoomSteps.length - 1, i + (event.deltaY < 0 ? 1 : -1)))];
-      });
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? element!.clientHeight : 1;
+      if (event.ctrlKey || event.metaKey) {
+        const rect = element!.getBoundingClientRect();
+        zoomAt(zoomRef.current * Math.exp(-event.deltaY * unit * 0.0075), [event.clientX - rect.left, event.clientY - rect.top]);
+        return;
+      }
+      const sideways = event.shiftKey && !event.deltaX;
+      const dx = (sideways ? event.deltaY : event.deltaX) * unit;
+      const dy = (sideways ? 0 : event.deltaY) * unit;
+      setCamera(current => ({ x: current.x + dx, y: current.y + dy }));
     }
     element.addEventListener("wheel", onWheel, { passive: false });
     return () => element.removeEventListener("wheel", onWheel);
-  }, []);
+  }, [zoomAt]);
+
+  // Frames the whole drawing (Shift+1).
+  function fit() {
+    const width = areaRef.current?.clientWidth || area.width;
+    const height = areaRef.current?.clientHeight || area.height;
+    const bounds = docGeometry && !isEmpty(doc) ? selectionRect(docGeometry, allElements(docGeometry)) : null;
+    if (!bounds || !width || !height) { setZoom(1); setCamera(homeCamera); return; }
+    const unit = measureAt(1);
+    const level = clampZoom(Math.min(2, (width - 64) / (bounds.width * unit.cellWidth), (height - 160) / (bounds.height * unit.advance)));
+    const scaled = measureAt(level);
+    setZoom(level);
+    setCamera({
+      x: (bounds.x + bounds.width / 2) * scaled.cellWidth - width / 2,
+      y: (bounds.y + bounds.height / 2) * scaled.advance - height / 2 - 20,
+    });
+  }
 
   // The hidden input covers the text being edited, so the browser never needs to scroll
   // anything to keep its caret in view. It is fixed to the viewport and portalled to <body>.
@@ -692,31 +814,37 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
     if (!editing) return { left: 0, top: 0, width: 1, height: 1 };
     const starts = lineStarts(editing, editing.value, viewGeometry);
     const bounds = canvasRef.current?.getBoundingClientRect();
-    const left = Math.min(...starts.map(start => start[0]), cols);
+    const left = Math.min(...starts.map(start => start[0]));
     const top = starts[0]?.[1] ?? 0;
     const lines = Math.max(1, editing.value.split("\n").length);
     return {
-      left: (bounds?.left ?? 0) + left * metrics.cellWidth,
-      top: (bounds?.top ?? 0) + top * metrics.advance,
-      width: (cols + 20) * metrics.cellWidth,
+      left: (bounds?.left ?? 0) - camera.x + left * metrics.cellWidth,
+      top: (bounds?.top ?? 0) - camera.y + top * metrics.advance,
+      width: Math.max(area.width, 400) * 2,
       height: (lines + 1) * metrics.advance,
       fontSize: metrics.size,
       lineHeight: `${metrics.advance}px`,
     };
-  }, [editing, viewGeometry, metrics, cols]);
-  const zoomBy = (direction: number) => setZoom(current => zoomSteps[Math.max(0, Math.min(zoomSteps.length - 1, zoomSteps.indexOf(current) + direction))]);
+  }, [editing, viewGeometry, metrics, camera, area]);
+  function zoomBy(direction: number) {
+    const current = zoomRef.current;
+    const next = direction > 0 ? zoomSteps.find(step => step > current + 0.001) : [...zoomSteps].reverse().find(step => step < current - 0.001);
+    zoomAt(next ?? current);
+  }
   const active = tools.find(item => item.id === tool)!;
   const onFocused = useCallback(() => setFocusField(null), []);
 
-  return <div className="draw-area">
-    <div ref={scrollRef} className="draw-scroll">
+  return <div ref={areaRef} className="draw-area">
       <canvas
         ref={canvasRef}
+        className="draw-canvas"
         tabIndex={0}
         aria-label="Drawing canvas"
         data-cell-width={metrics.cellWidth}
         data-row-height={metrics.advance}
-        style={{ cursor }}
+        data-origin-x={-camera.x}
+        data-origin-y={-camera.y}
+        style={{ cursor: spaceHeld && !drag.current ? "grab" : cursor }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -781,7 +909,6 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
         }}
         onBlur={finishEdit}
       />, document.body)}
-    </div>
 
     <div className="draw-toolbar" role="toolbar" aria-label="Drawing tools">
       {tools.map(item => <button key={item.id} type="button" aria-pressed={tool === item.id} aria-label={item.label} title={`${item.label} (${item.key})`} onClick={() => { setTool(item.id); if (item.id !== "select") setSelection(null); }}>
@@ -821,9 +948,10 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
       <button type="button" aria-label="Undo" title="Undo (⌘Z)" disabled={!canUndo} onClick={onUndo}>↶</button>
       <button type="button" aria-label="Redo" title="Redo (⇧⌘Z)" disabled={!canRedo} onClick={onRedo}>↷</button>
       <span className="toolbar-divider" aria-hidden="true" />
-      <button type="button" aria-label="Zoom out" disabled={zoom === zoomSteps[0]} onClick={() => zoomBy(-1)}>−</button>
-      <button type="button" className="zoom-level" aria-label="Reset zoom" title="Reset zoom" onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</button>
-      <button type="button" aria-label="Zoom in" disabled={zoom === zoomSteps.at(-1)} onClick={() => zoomBy(1)}>+</button>
+      <button type="button" aria-label="Zoom out" title="Zoom out (⌘−)" disabled={zoom <= minZoom + 0.001} onClick={() => zoomBy(-1)}>−</button>
+      <button type="button" className="zoom-level" aria-label="Reset zoom" title="Reset zoom (Shift+0)" onClick={() => zoomAt(1)}>{Math.round(zoom * 100)}%</button>
+      <button type="button" aria-label="Zoom in" title="Zoom in (⌘+)" disabled={zoom >= maxZoom - 0.001} onClick={() => zoomBy(1)}>+</button>
+      <button type="button" aria-label="Fit to content" title="Fit to content (Shift+1)" onClick={fit}>⤢</button>
     </div>
     <p className="draw-hint">{editing ? (editing.kind === "text" ? "Type. Enter adds a line. Esc or click away to finish." : "Type. Tab switches title and body. Esc or click away to finish.") : active.hint}</p>
     {message && <p className="draw-toast" role="status">{message}</p>}

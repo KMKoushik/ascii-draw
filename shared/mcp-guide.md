@@ -38,7 +38,7 @@ You describe a diagram as one JSON **spec** on a character grid. The server lays
 
 - Coordinates are integer character cells; `0,0` is the top-left; `x` grows right and `y` grows down.
 - A cell is about twice as tall as it is wide. A box that looks square is roughly twice as wide as it is tall, in cells.
-- `canvas.width` × `canvas.height` must contain everything (max 240 × 140). Trailing blank rows and columns are trimmed from the output, so a little slack is harmless.
+- `canvas.width` × `canvas.height` must contain everything (max 600 × 300). Trailing blank rows and columns are trimmed from the output, so a little slack is harmless.
 
 ## Spec reference
 
@@ -134,4 +134,4 @@ List every critical phrase (box titles, outcome labels). Rendering fails if one 
 
 ## Limits
 
-256 KiB per request · canvas up to 240 × 140 cells · 16 megapixels at the chosen point size (8–48) · 200 boxes · 300 connectors, lines, and texts each · 100 icons · 30 publishes or updates per minute per IP.
+256 KiB per request · canvas up to 600 × 300 cells · point size 8–48 (PNG export shrinks very large drawings to fit 16 megapixels) · 500 boxes · 800 connectors, lines, and texts each · 300 icons · 30 publishes or updates per minute per IP.
