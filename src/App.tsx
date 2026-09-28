@@ -1,8 +1,9 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Button } from "./components/ui/button";
 import { Panel } from "./components/ui/panel";
 import { Textarea } from "./components/ui/textarea";
 import { DiagramCanvas } from "./components/DiagramCanvas";
+import { DrawEditor } from "./components/DrawEditor";
 import { validateSpec, type Spec } from "../shared/spec";
 import { savePng, saveText } from "./lib/render";
 import example from "../shared/example.json";
@@ -39,33 +40,99 @@ function Header({ path }: { path: string }) {
   </header>;
 }
 
+type Mode = "draw" | "json";
+const modeStorage = "diagram-link:mode";
+function readMode(): Mode {
+  try { return localStorage.getItem(modeStorage) === "json" ? "json" : "draw"; } catch { return "draw"; }
+}
+
 function Share() {
   const [raw, setRaw] = useState(starter);
+  const [mode, setModeState] = useState<Mode>(readMode);
   const [title, setTitle] = useState(defaultTitle);
   const [busy, setBusy] = useState(false);
   const [published, setPublished] = useState<Published | null>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [, setHistoryVersion] = useState(0);
   const fileInput = useRef<HTMLInputElement>(null);
+  const rawRef = useRef(raw);
+  const history = useRef({ undo: [] as string[], redo: [] as string[], key: undefined as string | undefined, time: 0 });
+  rawRef.current = raw;
+
   const deferred = useDeferredValue(raw);
-  const parsed = useMemo(() => parse(deferred), [deferred]);
+  // Drawing needs the exact current state; the JSON preview can lag behind typing.
+  const source = mode === "draw" ? raw : deferred;
+  const parsed = useMemo(() => parse(source), [source]);
   const finalTitle = title.trim() || defaultTitle;
   const stale = !!published && (published.raw !== raw || published.title !== finalTitle);
-  const canShare = !!parsed.value && deferred === raw && !busy && (!published || stale);
+  const canShare = !!parsed.value && source === raw && !busy && (!published || stale);
+
+  function setMode(next: Mode) {
+    setModeState(next);
+    try { localStorage.setItem(modeStorage, next); } catch { /* storage unavailable */ }
+  }
+
+  const replace = useCallback((next: string, mergeKey?: string) => {
+    const current = rawRef.current;
+    if (next === current) return;
+    const h = history.current;
+    const now = Date.now();
+    if (!(mergeKey && h.key === mergeKey && now - h.time < 1500)) h.undo.push(current);
+    if (h.undo.length > 200) h.undo.shift();
+    h.redo = [];
+    h.key = mergeKey;
+    h.time = now;
+    rawRef.current = next;
+    setRaw(next);
+    setHistoryVersion(version => version + 1);
+  }, []);
+
+  const commitDrawing = useCallback((spec: Spec | null, mergeKey?: string) => {
+    replace(spec ? JSON.stringify(spec, null, 2) : "", mergeKey);
+  }, [replace]);
+
+  const step = useCallback((from: "undo" | "redo") => {
+    const h = history.current;
+    const next = h[from].pop();
+    if (next === undefined) return;
+    h[from === "undo" ? "redo" : "undo"].push(rawRef.current);
+    h.key = undefined;
+    rawRef.current = next;
+    setRaw(next);
+    setHistoryVersion(version => version + 1);
+  }, []);
+  const undo = useCallback(() => step("undo"), [step]);
+  const redo = useCallback(() => step("redo"), [step]);
+
+  useEffect(() => {
+    if (mode !== "draw") return;
+    function onPaste(event: ClipboardEvent) {
+      if ((event.target as HTMLElement | null)?.closest?.("input, textarea")) return;
+      const text = event.clipboardData?.getData("text/plain").trim();
+      if (!text?.startsWith("{")) return;
+      event.preventDefault();
+      if (text.length > maxFileBytes) { setError("Pasted JSON must be under 250 KB."); return; }
+      replace(text);
+      setError("");
+    }
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [mode, replace]);
 
   async function loadFile(file?: File) {
     if (!file) return;
     if (file.size > maxFileBytes) { setError("Choose a JSON file under 250 KB."); return; }
     try {
-      setRaw(await file.text());
+      replace(await file.text());
       setTitle(titleFrom(file.name));
       setError("");
     } catch { setError("Couldn’t read that file."); }
   }
 
   function format() {
-    try { setRaw(JSON.stringify(JSON.parse(raw), null, 2)); } catch { /* button is disabled for invalid JSON */ }
+    try { replace(JSON.stringify(JSON.parse(raw), null, 2)); } catch { /* button is disabled for invalid JSON */ }
   }
 
   async function share(event: FormEvent) {
@@ -92,31 +159,64 @@ function Share() {
   }
 
   const status = parsed.value ? <span className="good">[ valid ]</span> : parsed.error ? <span className="bad">[ invalid ]</span> : null;
+  const titleInput = <input name="title" aria-label="Title" maxLength={160} placeholder={defaultTitle} value={title} onChange={event => setTitle(event.target.value)} className="title-input" />;
+  const shareBar = <form className="share-bar" onSubmit={share}>
+    {published && !stale ? <>
+      <input name="share-link" aria-label="Share link" readOnly value={published.url} onFocus={event => event.target.select()} className="link-input" />
+      <a href={published.url} target="_blank" rel="noreferrer" className="link" aria-label="Open link in a new tab">Open ↗</a>
+      <Button size="sm" className="primary" onClick={async () => setCopied(await copy(published.url))}>{copied ? "Copied ✓" : "Copy link"}</Button>
+    </> : <Button type="submit" size="sm" className="primary" disabled={!canShare}>{busy ? "Sharing…" : stale ? "Share again →" : "Share →"}</Button>}
+  </form>;
+  const dropProps = {
+    "data-dragging": dragging || undefined,
+    onDragOver: (event: React.DragEvent) => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setDragging(true); } },
+    onDragLeave: (event: React.DragEvent) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false); },
+    onDrop: (event: React.DragEvent) => { if (!event.dataTransfer.files.length) return; event.preventDefault(); setDragging(false); void loadFile(event.dataTransfer.files[0]); },
+  };
 
   return <>
-    <div className="intro">
-      <h1>Share a diagram.</h1>
-      <p className="lede">Paste or edit the JSON. Share it. Copy the link.</p>
+    <div className="intro intro-row">
+      <div className="intro">
+        <h1>Share a diagram.</h1>
+        <p className="lede">Draw it or paste the JSON. Share it. Copy the link.</p>
+      </div>
+      <div className="mode-tabs" role="group" aria-label="Editor">
+        <button type="button" aria-pressed={mode === "draw"} onClick={() => setMode("draw")}>Draw</button>
+        <button type="button" aria-pressed={mode === "json"} onClick={() => setMode("json")}>JSON</button>
+      </div>
     </div>
 
     <input ref={fileInput} type="file" name="diagram" accept=".json,application/json" aria-label="Diagram JSON file" className="hidden" onChange={event => { void loadFile(event.target.files?.[0]); event.target.value = ""; }} />
 
-    <div className="workspace">
-      <section
-        className="pane editor"
-        aria-label="JSON"
-        data-dragging={dragging || undefined}
-        onDragOver={event => { event.preventDefault(); setDragging(true); }}
-        onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false); }}
-        onDrop={event => { event.preventDefault(); setDragging(false); void loadFile(event.dataTransfer.files[0]); }}
-      >
+    {mode === "draw" ? <div className="workspace single">
+      <section className="pane draw-pane" aria-label="Drawing" {...dropProps}>
         <div className="pane-bar">
-          <input name="title" aria-label="Title" maxLength={160} placeholder={defaultTitle} value={title} onChange={event => setTitle(event.target.value)} className="title-input" />
+          {titleInput}
+          {status}
+          <span className="pane-actions">
+            <button type="button" className="link" onClick={() => fileInput.current?.click()}>Upload ↑</button>
+            <button type="button" className="link" disabled={!raw} onClick={() => replace("")}>Clear</button>
+          </span>
+          {shareBar}
+        </div>
+        {parsed.value || !raw.trim()
+          ? <DrawEditor spec={parsed.value?.spec ?? null} diagram={parsed.value?.diagram ?? null} onCommit={commitDrawing} onUndo={undo} onRedo={redo} canUndo={history.current.undo.length > 0} canRedo={history.current.redo.length > 0} />
+          : <div className="stage">
+            <div className="draw-invalid">
+              <p className="frame-error" role="alert">{parsed.error}</p>
+              <button type="button" className="link" onClick={() => setMode("json")}>Fix it in JSON →</button>
+            </div>
+          </div>}
+      </section>
+    </div> : <div className="workspace">
+      <section className="pane editor" aria-label="JSON" {...dropProps}>
+        <div className="pane-bar">
+          {titleInput}
           {status}
           <span className="pane-actions">
             <button type="button" className="link" onClick={() => fileInput.current?.click()}>Upload ↑</button>
             <button type="button" className="link" disabled={!parsed.value && !raw.trim()} onClick={format}>Format</button>
-            <button type="button" className="link" disabled={!raw} onClick={() => { setRaw(""); setTitle(""); }}>Clear</button>
+            <button type="button" className="link" disabled={!raw} onClick={() => { replace(""); setTitle(""); }}>Clear</button>
           </span>
         </div>
         <Textarea
@@ -127,7 +227,7 @@ function Share() {
           autoCorrect="off"
           placeholder="Paste diagram JSON here"
           value={raw}
-          onChange={event => setRaw(event.target.value)}
+          onChange={event => { rawRef.current = event.target.value; setRaw(event.target.value); history.current.key = undefined; }}
           className="json-editor"
         />
       </section>
@@ -136,15 +236,7 @@ function Share() {
         <div className="pane-bar">
           <span className="pane-title">Preview</span>
           {parsed.value && <span className="dim">{parsed.value.spec.canvas.width} × {parsed.value.spec.canvas.height}</span>}
-          <form className="share-bar" onSubmit={share}>
-            {published && !stale ? <>
-              <input name="share-link" aria-label="Share link" readOnly value={published.url} onFocus={event => event.target.select()} className="link-input" />
-              <a href={published.url} target="_blank" rel="noreferrer" className="link" aria-label="Open link in a new tab">Open ↗</a>
-              <Button size="sm" className="primary" onClick={async () => setCopied(await copy(published.url))}>{copied ? "Copied ✓" : "Copy link"}</Button>
-            </> : <>
-              <Button type="submit" size="sm" className="primary" disabled={!canShare}>{busy ? "Sharing…" : stale ? "Share again →" : "Share →"}</Button>
-            </>}
-          </form>
+          {shareBar}
         </div>
         <div className="stage">
           {parsed.value
@@ -154,7 +246,7 @@ function Share() {
               : <p className="hint">Paste diagram JSON on the left.</p>}
         </div>
       </section>
-    </div>
+    </div>}
 
     {error && <p className="error-text" role="alert">{error}</p>}
   </>;

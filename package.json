@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "wrangler dev",
+    "preview": "wrangler dev --local-upstream localhost:8787",
     "deploy": "npm run build && wrangler deploy",
     "test": "vitest run",
     "test:e2e": "playwright test",

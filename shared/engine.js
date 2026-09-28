@@ -871,4 +871,4 @@ function buildDiagram(spec) {
 }
 
 
-export { buildDiagram, loadSvgIconLibrary, loadCatalogIcon };
+export { buildDiagram, loadSvgIconLibrary, loadCatalogIcon, measureBox, resolvePath, normalizePathPoints, ensureArrowApproach, inferArrow, displayWidth };

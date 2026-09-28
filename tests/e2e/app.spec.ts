@@ -17,6 +17,10 @@ async function publish(request: APIRequestContext, extra = {}) {
   return await response.json() as { id: string; url: string };
 }
 function apiUrl(url: string) { const result = new URL(url); result.pathname = result.pathname.replace("/d/", "/api/diagrams/"); return result.href; }
+async function openJson(page: import("@playwright/test").Page) {
+  await page.goto("/");
+  await page.getByRole("button", { name: "JSON", exact: true }).click();
+}
 async function iconPixels(page: import("@playwright/test").Page) {
   return page.locator("canvas").evaluate((canvas: HTMLCanvasElement) => {
     const { data } = canvas.getContext("2d")!.getImageData(0, 150, canvas.width, canvas.height - 150);
@@ -82,7 +86,7 @@ test("paste/edit, share, copy: no key, edits need a new share", async ({ page, c
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto("/");
+  await openJson(page);
   const editor = page.getByRole("textbox", { name: "Diagram JSON" });
   await expect(editor).toHaveValue(/"canvas"/);
   await expect(page.getByRole("textbox", { name: "Title" })).toHaveValue("Architecture");
@@ -125,7 +129,7 @@ test("paste/edit, share, copy: no key, edits need a new share", async ({ page, c
 });
 
 test("upload fills the editor and title; invalid JSON blocks sharing", async ({ page }) => {
-  await page.goto("/");
+  await openJson(page);
   await page.getByLabel("Diagram JSON file").setInputFiles(exampleFile);
   await expect(page.getByRole("textbox", { name: "Title" })).toHaveValue("agent to browser");
   await expect(page.getByRole("textbox", { name: "Diagram JSON" })).toHaveValue(JSON.stringify(example));
@@ -138,7 +142,7 @@ test("upload fills the editor and title; invalid JSON blocks sharing", async ({ 
 });
 
 test("icons render in the editor preview, the shared view, and the PNG", async ({ page, request }) => {
-  await page.goto("/");
+  await openJson(page);
   await page.getByRole("textbox", { name: "Diagram JSON" }).fill(JSON.stringify(iconSpec, null, 2));
   await expect(page.locator("canvas")).toBeVisible();
   await expect.poll(() => iconPixels(page)).toBeGreaterThan(50);
@@ -174,6 +178,9 @@ test("desktop screens have a clean console and fit the viewport", async ({ page,
   await page.goto("/");
   await expect(page.locator("canvas")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: "test-results/desktop-draw.png", fullPage: true });
+  await page.getByRole("button", { name: "JSON", exact: true }).click();
+  await expect(page.locator("canvas")).toBeVisible();
   await page.screenshot({ path: "test-results/desktop-editor.png", fullPage: true });
   await page.getByRole("button", { name: "Share →" }).click();
   await expect(page.getByRole("textbox", { name: "Share link" })).toBeVisible();

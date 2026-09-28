@@ -8,7 +8,7 @@ export default defineConfig({
   timeout: 30000,
   use: { baseURL: "http://localhost:8787", viewport: { width: 1440, height: 1050 }, extraHTTPHeaders: { "CF-Connecting-IP": clientIp } },
   webServer: {
-    command: "npx wrangler dev --port 8787",
+    command: "npx wrangler dev --port 8787 --local-upstream localhost:8787",
     url: "http://localhost:8787",
     reuseExistingServer: !process.env.CI,
     env: { PUBLISH_API_KEY: "local-test-key-not-for-production" },

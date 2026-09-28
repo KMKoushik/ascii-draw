@@ -37,7 +37,7 @@ for (const variant of ["outline", "filled"]) {
   await cp(dir, `public/icons/${variant}`, { recursive: true });
 }
 await writeFile("shared/icon-catalog.json", JSON.stringify(ids));
-await writeFile("shared/engine.js", `// Generated from ascii-diagram-png by scripts/sync-renderer.mjs.\nimport iconLibrary from './icon-library.json';\nimport iconIds from './icon-catalog.json';\nconst catalog = new Set(iconIds);\n${core}\nexport { buildDiagram, loadSvgIconLibrary, loadCatalogIcon };\n`);
+await writeFile("shared/engine.js", `// Generated from ascii-diagram-png by scripts/sync-renderer.mjs.\nimport iconLibrary from './icon-library.json';\nimport iconIds from './icon-catalog.json';\nconst catalog = new Set(iconIds);\n${core}\nexport { buildDiagram, loadSvgIconLibrary, loadCatalogIcon, measureBox, resolvePath, normalizePathPoints, ensureArrowApproach, inferArrow, displayWidth };\n`);
 await cp(join(skill, "assets/JetBrainsMono-Regular.ttf"), "public/fonts/JetBrainsMono-Regular.ttf");
 await cp(join(skill, "assets/JetBrainsMono-OFL.txt"), "public/licenses/JetBrainsMono-OFL.txt");
 await cp(join(skill, "assets/TABLER-ICONS-LICENSE.txt"), "public/licenses/TABLER-ICONS-LICENSE.txt");

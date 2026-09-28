@@ -1,0 +1,553 @@
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { Diagram } from "../../shared/engine.js";
+import type { Spec } from "../../shared/spec";
+import {
+  autoPorts, boxAt, emptySpec, finalize, friendlyError, geometry, hitTest, isEmpty, isMovable, nextBoxId, normalize,
+  rectFor, removeElement, requiredBoxSize, translate, type ElementRef, type Geometry, type Point, type Rect,
+} from "../../shared/geometry";
+import { loadIcon, loadedIcon, measureFont, paintCells, paintIcon } from "../lib/render";
+import { Inspector } from "./Inspector";
+
+export type Tool = "select" | "box" | "arrow" | "text" | "icon";
+export const palette = ["#e8e8e5", "#79bdff", "#ffd15b", "#b7e3a1", "#ff9d91", "#c4a7ff", "#7fdbca", "#929da7"];
+
+const tools: { id: Tool; label: string; key: string; glyph: string; hint: string }[] = [
+  { id: "select", label: "Select", key: "V", glyph: "↖", hint: "Click to select. Drag to move. Delete removes." },
+  { id: "box", label: "Box", key: "R", glyph: "▭", hint: "Drag to draw a box. Click for a default size." },
+  { id: "arrow", label: "Arrow", key: "A", glyph: "→", hint: "Drag from one box to another." },
+  { id: "text", label: "Text", key: "T", glyph: "T", hint: "Click to place text." },
+  { id: "icon", label: "Icon", key: "I", glyph: "◇", hint: "Click to place an icon." },
+];
+const toolKeys: Record<string, Tool> = { v: "select", r: "box", a: "arrow", t: "text", i: "icon", "1": "select", "2": "box", "3": "arrow", "4": "text", "5": "icon" };
+const baseSize = 16;
+const zoomSteps = [0.5, 0.67, 0.8, 1, 1.25, 1.5, 2];
+const emptyDiagram: Diagram = { text: "", cells: [], pngCells: [], icons: [] };
+
+type Handle = "nw" | "ne" | "sw" | "se";
+type View = { spec: Spec; diagram: Diagram };
+type Drag =
+  | { type: "move"; start: Point; origin: Spec; before: Geometry; ref: ElementRef; candidate?: Spec }
+  | { type: "resize"; start: Point; origin: Spec; before: Geometry; ref: ElementRef; handle: Handle; candidate?: Spec }
+  | { type: "box"; start: Point; current: Point }
+  | { type: "arrow"; start: Point; startBox: number; current: Point; candidate?: Spec };
+type Ghost = { rect?: Rect; path?: Point[]; invalid?: boolean };
+type Path = NonNullable<Spec["connectors"]>[number];
+
+type Props = {
+  spec: Spec | null;
+  diagram: Diagram | null;
+  onCommit: (spec: Spec | null, mergeKey?: string) => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+};
+
+const sameRef = (a: ElementRef | null, b: ElementRef | null) => !!a && !!b && a.kind === b.kind && a.index === b.index;
+const between = (a: Point, b: Point): Rect => ({ x: Math.min(a[0], b[0]), y: Math.min(a[1], b[1]), width: Math.abs(a[0] - b[0]) + 1, height: Math.abs(a[1] - b[1]) + 1 });
+const cellRect = ([x, y]: Point): Rect => ({ x, y, width: 1, height: 1 });
+
+function pathCells(path: Point[]) {
+  const cells: Point[] = [];
+  for (let i = 1; i < path.length; i++) {
+    const [x1, y1] = path[i - 1];
+    const [x2, y2] = path[i];
+    const steps = Math.max(Math.abs(x2 - x1), Math.abs(y2 - y1));
+    for (let s = 0; s <= steps; s++) cells.push([x1 + Math.sign(x2 - x1) * s, y1 + Math.sign(y2 - y1) * s]);
+  }
+  return cells;
+}
+
+export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onUndo, onRedo, canUndo, canRedo }: Props) {
+  const base: View = useMemo(() => ({ spec: specProp ?? emptySpec, diagram: diagramProp ?? emptyDiagram }), [specProp, diagramProp]);
+  const doc = useMemo(() => normalize(base.spec), [base.spec]);
+  const docGeometry = useMemo(() => { try { return geometry(doc); } catch { return null; } }, [doc]);
+
+  const [tool, setTool] = useState<Tool>("select");
+  const [color, setColor] = useState(palette[1]);
+  const [selection, setSelection] = useState<ElementRef | null>(null);
+  const [hover, setHover] = useState<ElementRef | null>(null);
+  const [preview, setPreview] = useState<View | null>(null);
+  const [ghost, setGhost] = useState<Ghost | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [message, setMessage] = useState("");
+  const [fontReady, setFontReady] = useState(false);
+  const [iconTick, setIconTick] = useState(0);
+  const [cursor, setCursor] = useState("default");
+  const [focusField, setFocusField] = useState<string | null>(null);
+  const [lastIcon, setLastIcon] = useState("outline/server");
+  const drag = useRef<Drag | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const messageTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  const view = preview ?? base;
+  const viewGeometry = useMemo(() => {
+    if (!preview) return docGeometry;
+    try { return geometry(normalize(preview.spec)); } catch { return null; }
+  }, [preview, docGeometry]);
+
+  useEffect(() => { void document.fonts.load(`${baseSize}px "JetBrains Mono"`).then(() => setFontReady(true)); }, []);
+  const metrics = useMemo(() => {
+    const context = document.createElement("canvas").getContext("2d")!;
+    return measureFont(context, baseSize * zoom, Math.round(2 * zoom));
+    // fontReady re-measures once JetBrains Mono has loaded.
+  }, [zoom, fontReady]); // eslint-disable-line react-hooks/exhaustive-deps
+  const cols = Math.max(view.spec.canvas.width + 40, 120);
+  const rows = Math.max(view.spec.canvas.height + 16, 44);
+
+  useEffect(() => {
+    if (selection && docGeometry && !rectFor(docGeometry, selection)) setSelection(null);
+  }, [docGeometry, selection]);
+
+  const flash = useCallback((text: string) => {
+    setMessage(text);
+    clearTimeout(messageTimer.current);
+    messageTimer.current = setTimeout(() => setMessage(""), 3200);
+  }, []);
+  useEffect(() => () => clearTimeout(messageTimer.current), []);
+
+  const commit = useCallback((next: Spec, mergeKey?: string) => {
+    if (isEmpty(next)) { onCommit(null, mergeKey); return true; }
+    try {
+      onCommit(finalize(next).spec, mergeKey);
+      return true;
+    } catch (error) {
+      flash(friendlyError(error));
+      return false;
+    }
+  }, [onCommit, flash]);
+
+  const tryView = (next: Spec): View | null => {
+    if (isEmpty(next)) return { spec: emptySpec, diagram: emptyDiagram };
+    try { return finalize(next); } catch { return null; }
+  };
+
+  // Paint: grid, the engine's cells and icons, then selection overlays.
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const { cellWidth: cw, advance: ah } = metrics;
+    const dpr = window.devicePixelRatio || 1;
+    const width = Math.ceil(cols * cw);
+    const height = Math.ceil(rows * ah);
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    const context = canvas.getContext("2d")!;
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    context.fillStyle = view.spec.style?.background ?? "#000000";
+    context.fillRect(0, 0, width, height);
+    context.fillStyle = "#1c252c";
+    for (let r = 0; r <= rows; r++) for (let c = 0; c <= cols; c++) context.fillRect(Math.round(c * cw), Math.round(r * ah), 1, 1);
+
+    paintCells(context, view.diagram.pngCells, metrics, 0, 0, view.spec.style?.foreground ?? "#f2f2f2");
+    for (const icon of view.diagram.icons) {
+      const image = loadedIcon(icon.id, icon.color);
+      if (image) paintIcon(context, image, icon, metrics, 0, 0);
+      else loadIcon(icon.id, icon.color).then(() => setIconTick(tick => tick + 1)).catch(() => {});
+    }
+
+    const box = (rect: Rect, stroke: string, dash: number[] = [], lineWidth = 1) => {
+      context.save();
+      context.strokeStyle = stroke;
+      context.lineWidth = lineWidth;
+      context.setLineDash(dash);
+      context.strokeRect(rect.x * cw - 2.5, rect.y * ah - 2.5, rect.width * cw + 5, rect.height * ah + 5);
+      context.restore();
+    };
+    const fillPath = (path: Point[], fill: string) => {
+      context.fillStyle = fill;
+      for (const [x, y] of pathCells(path)) context.fillRect(x * cw, y * ah, cw, ah);
+    };
+    const g = viewGeometry;
+    if (g && hover && !drag.current && !sameRef(hover, selection)) {
+      const rect = rectFor(g, hover);
+      if (hover.kind === "connector" || hover.kind === "line") fillPath((hover.kind === "connector" ? g.connectors : g.lines)[hover.index], "rgba(121, 189, 255, 0.10)");
+      else if (rect) box(rect, "rgba(121, 189, 255, 0.35)");
+    }
+    if (g && selection) {
+      const rect = rectFor(g, selection);
+      if (selection.kind === "connector" || selection.kind === "line") {
+        fillPath((selection.kind === "connector" ? g.connectors : g.lines)[selection.index], "rgba(121, 189, 255, 0.22)");
+      } else if (rect) {
+        box(rect, "#79bdff", [4, 3]);
+        const handles: Handle[] = selection.kind === "box" ? ["nw", "ne", "sw", "se"] : selection.kind === "icon" ? ["se"] : [];
+        for (const handle of handles) {
+          const [hx, hy] = handlePoint(rect, handle);
+          context.fillStyle = "#000000";
+          context.fillRect(hx - 4, hy - 4, 8, 8);
+          context.strokeStyle = "#79bdff";
+          context.lineWidth = 1;
+          context.setLineDash([]);
+          context.strokeRect(hx - 3.5, hy - 3.5, 7, 7);
+        }
+      }
+    }
+    if (ghost?.rect) box(ghost.rect, ghost.invalid ? "#ff9d91" : "#79bdff", [4, 3]);
+    if (ghost?.path) fillPath(ghost.path, ghost.invalid ? "rgba(255, 157, 145, 0.25)" : "rgba(121, 189, 255, 0.2)");
+
+    function handlePoint(rect: Rect, handle: Handle): Point {
+      const left = rect.x * cw - 2.5;
+      const top = rect.y * ah - 2.5;
+      const right = (rect.x + rect.width) * cw + 2.5;
+      const bottom = (rect.y + rect.height) * ah + 2.5;
+      return [handle.includes("w") ? left : right, handle.includes("n") ? top : bottom];
+    }
+  }, [view, viewGeometry, metrics, cols, rows, hover, selection, ghost, iconTick]);
+
+  function pointer(event: React.PointerEvent | React.MouseEvent) {
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    const cell: Point = [
+      Math.min(cols - 1, Math.max(0, Math.floor(x / metrics.cellWidth))),
+      Math.min(rows - 1, Math.max(0, Math.floor(y / metrics.advance))),
+    ];
+    return { cell, x, y };
+  }
+
+  function handleAt(x: number, y: number): Handle | null {
+    if (!selection || !docGeometry || (selection.kind !== "box" && selection.kind !== "icon")) return null;
+    const rect = rectFor(docGeometry, selection);
+    if (!rect) return null;
+    const { cellWidth: cw, advance: ah } = metrics;
+    const handles: Handle[] = selection.kind === "box" ? ["nw", "ne", "sw", "se"] : ["se"];
+    for (const handle of handles) {
+      const hx = handle.includes("w") ? rect.x * cw - 2.5 : (rect.x + rect.width) * cw + 2.5;
+      const hy = handle.includes("n") ? rect.y * ah - 2.5 : (rect.y + rect.height) * ah + 2.5;
+      if (Math.abs(x - hx) <= 8 && Math.abs(y - hy) <= 8) return handle;
+    }
+    return null;
+  }
+
+  function resized(d: Extract<Drag, { type: "resize" }>, cell: Point): Spec {
+    const next = structuredClone(d.origin);
+    const dx = cell[0] - d.start[0];
+    const dy = cell[1] - d.start[1];
+    const rect = rectFor(d.before, d.ref)!;
+    if (d.ref.kind === "icon") {
+      const icon = next.icons![d.ref.index];
+      icon.width = Math.max(2, rect.width + dx);
+      icon.height = Math.max(1, rect.height + dy);
+      return next;
+    }
+    const target = next.boxes![d.ref.index];
+    const min = requiredBoxSize(target);
+    const width = Math.max(min.width, d.handle.includes("w") ? rect.width - dx : rect.width + dx);
+    const height = Math.max(min.height, d.handle.includes("n") ? rect.height - dy : rect.height + dy);
+    target.x = d.handle.includes("w") ? Math.max(0, rect.x + rect.width - width) : rect.x;
+    target.y = d.handle.includes("n") ? Math.max(0, rect.y + rect.height - height) : rect.y;
+    target.width = width;
+    target.height = height;
+    return next;
+  }
+
+  function arrowSpec(d: Extract<Drag, { type: "arrow" }>): Spec | null {
+    if (!docGeometry) return null;
+    const g = docGeometry;
+    const endBox = boxAt(g, d.current);
+    const same = d.start[0] === d.current[0] && d.start[1] === d.current[1];
+    if ((d.startBox >= 0 && endBox === d.startBox) || (d.startBox < 0 && endBox < 0 && same)) return null;
+    const next = structuredClone(doc);
+    const id = (i: number) => next.boxes![i].id!;
+    const connector: Path = { color };
+    if (d.startBox >= 0 && endBox >= 0) {
+      const [from, to] = autoPorts(g.boxes[d.startBox], g.boxes[endBox]);
+      connector.from = { box: id(d.startBox), port: from };
+      connector.to = { box: id(endBox), port: to };
+    } else if (d.startBox >= 0) {
+      connector.from = { box: id(d.startBox), port: autoPorts(g.boxes[d.startBox], cellRect(d.current))[0] };
+      connector.to = d.current;
+    } else if (endBox >= 0) {
+      connector.from = d.start;
+      connector.to = { box: id(endBox), port: autoPorts(cellRect(d.start), g.boxes[endBox])[1] };
+    } else {
+      const [sx, sy] = d.start;
+      const [ex, ey] = d.current;
+      connector.points = sx === ex || sy === ey ? [d.start, d.current] : [d.start, [ex, sy], d.current];
+    }
+    next.connectors = [...(next.connectors ?? []), connector];
+    return next;
+  }
+
+  function candidateRect(d: Extract<Drag, { type: "move" | "resize" }>, cell: Point): Rect | null {
+    const rect = rectFor(d.before, d.ref);
+    if (!rect) return null;
+    if (d.type === "move") return { ...rect, x: Math.max(0, rect.x + cell[0] - d.start[0]), y: Math.max(0, rect.y + cell[1] - d.start[1]) };
+    try { return rectFor(geometry(normalize(resized(d, cell))), d.ref); } catch { return rect; }
+  }
+
+  function place(next: Spec, select: ElementRef, field: string | null) {
+    if (commit(next)) {
+      setSelection(select);
+      setFocusField(field);
+    }
+    setTool("select");
+  }
+
+  function onPointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (event.button !== 0 || !docGeometry) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.currentTarget.focus({ preventScroll: true });
+    const { cell, x, y } = pointer(event);
+    if (tool === "select") {
+      const handle = handleAt(x, y);
+      if (handle && selection) {
+        drag.current = { type: "resize", start: cell, origin: doc, before: docGeometry, ref: selection, handle };
+        return;
+      }
+      const hit = hitTest(docGeometry, cell);
+      setSelection(hit);
+      setFocusField(null);
+      if (hit && isMovable(doc, hit)) drag.current = { type: "move", start: cell, origin: doc, before: docGeometry, ref: hit };
+      return;
+    }
+    if (tool === "box") {
+      drag.current = { type: "box", start: cell, current: cell };
+      setGhost({ rect: between(cell, cell) });
+      return;
+    }
+    if (tool === "arrow") {
+      drag.current = { type: "arrow", start: cell, startBox: boxAt(docGeometry, cell), current: cell };
+      return;
+    }
+    if (tool === "text") {
+      const next = structuredClone(doc);
+      next.texts = [...(next.texts ?? []), { x: cell[0], y: cell[1], value: "Text", color }];
+      place(next, { kind: "text", index: next.texts.length - 1 }, "value");
+      return;
+    }
+    const next = structuredClone(doc);
+    next.icons = [...(next.icons ?? []), { id: lastIcon, x: cell[0], y: cell[1], width: 4, height: 3, color }];
+    place(next, { kind: "icon", index: next.icons.length - 1 }, "icon");
+  }
+
+  function onPointerMove(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (!docGeometry) return;
+    const { cell, x, y } = pointer(event);
+    const d = drag.current;
+    if (!d) {
+      if (tool !== "select") { setCursor("crosshair"); setHover(null); return; }
+      const handle = handleAt(x, y);
+      if (handle) { setCursor(handle === "nw" || handle === "se" ? "nwse-resize" : "nesw-resize"); return; }
+      const hit = hitTest(docGeometry, cell);
+      setHover(hit);
+      setCursor(hit ? (isMovable(doc, hit) ? "move" : "pointer") : "default");
+      return;
+    }
+    if (d.type === "box") {
+      d.current = cell;
+      setGhost({ rect: between(d.start, cell) });
+      return;
+    }
+    if (d.type === "arrow") {
+      d.current = cell;
+      const next = arrowSpec(d);
+      const result = next && tryView(next);
+      d.candidate = result ? next! : undefined;
+      if (result) { setPreview(result); setGhost(null); }
+      else { setPreview(null); setGhost({ path: [d.start, [cell[0], d.start[1]], cell], invalid: !!next }); }
+      return;
+    }
+    if (d.type === "move" && cell[0] === d.start[0] && cell[1] === d.start[1]) {
+      d.candidate = undefined;
+      setPreview(null);
+      setGhost(null);
+      return;
+    }
+    const next = d.type === "move" ? translate(d.origin, d.before, d.ref, cell[0] - d.start[0], cell[1] - d.start[1]) : resized(d, cell);
+    d.candidate = next;
+    const result = tryView(next);
+    if (result) { setPreview(result); setGhost(null); }
+    else { setPreview(null); setGhost({ rect: candidateRect(d, cell) ?? undefined, invalid: true }); }
+  }
+
+  function onPointerUp() {
+    const d = drag.current;
+    drag.current = null;
+    setPreview(null);
+    setGhost(null);
+    if (!d) return;
+    if (d.type === "move" || d.type === "resize") {
+      if (d.candidate) commit(d.candidate);
+      return;
+    }
+    if (d.type === "arrow") {
+      const next = arrowSpec(d);
+      if (!next) { flash("Drag from a box, or across empty space, to draw an arrow."); return; }
+      const key = next.connectors!.length - 1;
+      if (commit(next)) { setSelection({ kind: "connector", index: key }); setTool("select"); }
+      return;
+    }
+    let rect = between(d.start, d.current);
+    if (rect.width < 4 || rect.height < 3) rect = { x: d.start[0], y: d.start[1], width: 20, height: 5 };
+    const next = structuredClone(doc);
+    next.boxes = [...(next.boxes ?? []), { id: nextBoxId(doc), ...rect, color }];
+    place(next, { kind: "box", index: next.boxes.length - 1 }, "title");
+  }
+
+  function onPointerCancel() {
+    drag.current = null;
+    setPreview(null);
+    setGhost(null);
+  }
+
+  function onDoubleClick(event: React.MouseEvent<HTMLCanvasElement>) {
+    if (tool !== "select" || !docGeometry) return;
+    const { cell } = pointer(event);
+    const hit = hitTest(docGeometry, cell);
+    if (hit?.kind === "box") { setSelection(hit); setFocusField("title"); return; }
+    if (hit?.kind === "text") { setSelection(hit); setFocusField("value"); return; }
+    if (hit?.kind === "icon") { setSelection(hit); setFocusField("icon"); return; }
+    if (!hit) {
+      const next = structuredClone(doc);
+      next.texts = [...(next.texts ?? []), { x: cell[0], y: cell[1], value: "Text", color }];
+      place(next, { kind: "text", index: next.texts.length - 1 }, "value");
+    }
+  }
+
+  const remove = useCallback(() => {
+    if (!selection) return;
+    if (commit(removeElement(doc, selection))) setSelection(null);
+  }, [selection, doc, commit]);
+
+  const recolor = (value: string) => {
+    setColor(value);
+    if (!selection) return;
+    const next = structuredClone(doc);
+    const { kind, index } = selection;
+    if (kind === "box") next.boxes![index].color = value;
+    if (kind === "text") next.texts![index].color = value;
+    if (kind === "icon") next.icons![index].color = value;
+    if (kind === "arrow") next.arrows![index].color = value;
+    if (kind === "connector") { next.connectors![index].color = value; delete next.connectors![index].arrowColor; }
+    if (kind === "line") next.lines![index].color = value;
+    commit(next, `${kind}:${index}:color`);
+  };
+
+  const duplicate = useCallback(() => {
+    if (!selection || !docGeometry) return;
+    const next = structuredClone(doc);
+    const { kind, index } = selection;
+    const rect = rectFor(docGeometry, selection);
+    if (kind === "box" && rect) {
+      next.boxes!.push({ ...structuredClone(next.boxes![index]), id: nextBoxId(next), x: rect.x + rect.width + 2 });
+      if (commit(next)) setSelection({ kind, index: next.boxes!.length - 1 });
+    } else if (kind === "text") {
+      const text = next.texts![index];
+      next.texts!.push({ ...text, y: text.y + 1 });
+      if (commit(next)) setSelection({ kind, index: next.texts!.length - 1 });
+    } else if (kind === "icon") {
+      const icon = next.icons![index];
+      next.icons!.push({ ...icon, x: icon.x + icon.width + 1 });
+      if (commit(next)) setSelection({ kind, index: next.icons!.length - 1 });
+    }
+  }, [selection, doc, docGeometry, commit]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement;
+      if (target.closest?.("input, textarea, select, [contenteditable]")) {
+        if (event.key === "Escape") target.blur();
+        return;
+      }
+      const mod = event.metaKey || event.ctrlKey;
+      const key = event.key.toLowerCase();
+      if (mod && key === "z") { event.preventDefault(); if (event.shiftKey) onRedo(); else onUndo(); return; }
+      if (mod && key === "y") { event.preventDefault(); onRedo(); return; }
+      if (mod && key === "d") { event.preventDefault(); duplicate(); return; }
+      if (mod || event.altKey) return;
+      if ((event.key === "Delete" || event.key === "Backspace") && selection) { event.preventDefault(); remove(); return; }
+      if (event.key === "Escape") { setSelection(null); setTool("select"); onPointerCancel(); return; }
+      if (event.key === "Enter" && selection) {
+        event.preventDefault();
+        setFocusField(selection.kind === "box" ? "title" : selection.kind === "text" ? "value" : selection.kind === "icon" ? "icon" : null);
+        return;
+      }
+      const nudges: Record<string, Point> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+      if (nudges[event.key] && selection && docGeometry && isMovable(doc, selection)) {
+        event.preventDefault();
+        const step = event.shiftKey ? 5 : 1;
+        commit(translate(doc, docGeometry, selection, nudges[event.key][0] * step, nudges[event.key][1] * step), `${selection.kind}:${selection.index}:nudge`);
+        return;
+      }
+      if (toolKeys[key]) { setTool(toolKeys[key]); if (toolKeys[key] !== "select") setSelection(null); }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selection, doc, docGeometry, commit, remove, duplicate, onUndo, onRedo]);
+
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+    function onWheel(event: WheelEvent) {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      setZoom(current => {
+        const i = zoomSteps.indexOf(current);
+        return zoomSteps[Math.max(0, Math.min(zoomSteps.length - 1, i + (event.deltaY < 0 ? 1 : -1)))];
+      });
+    }
+    element.addEventListener("wheel", onWheel, { passive: false });
+    return () => element.removeEventListener("wheel", onWheel);
+  }, []);
+
+  const zoomBy = (direction: number) => setZoom(current => zoomSteps[Math.max(0, Math.min(zoomSteps.length - 1, zoomSteps.indexOf(current) + direction))]);
+  const active = tools.find(item => item.id === tool)!;
+  const onFocused = useCallback(() => setFocusField(null), []);
+
+  return <div className="draw-area">
+    <div ref={scrollRef} className="draw-scroll">
+      <canvas
+        ref={canvasRef}
+        tabIndex={0}
+        aria-label="Drawing canvas"
+        data-cell-width={metrics.cellWidth}
+        data-row-height={metrics.advance}
+        style={{ cursor }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
+        onPointerLeave={() => { if (!drag.current) setHover(null); }}
+        onDoubleClick={onDoubleClick}
+      />
+    </div>
+
+    <div className="draw-toolbar" role="toolbar" aria-label="Drawing tools">
+      {tools.map(item => <button key={item.id} type="button" aria-pressed={tool === item.id} aria-label={item.label} title={`${item.label} (${item.key})`} onClick={() => { setTool(item.id); if (item.id !== "select") setSelection(null); }}>
+        <span aria-hidden="true">{item.glyph}</span>
+      </button>)}
+      <span className="toolbar-divider" aria-hidden="true" />
+      {palette.map(value => <button key={value} type="button" className="swatch" aria-pressed={color === value} aria-label={`Color ${value}`} title={value} style={{ "--swatch": value } as React.CSSProperties} onClick={() => recolor(value)} />)}
+    </div>
+
+    {selection && <Inspector
+      key={`${selection.kind}:${selection.index}`}
+      spec={doc}
+      selection={selection}
+      focusField={focusField}
+      onFocused={onFocused}
+      onChange={(next, mergeKey) => commit(next, mergeKey)}
+      onDelete={remove}
+      onSelect={setSelection}
+      onIconChosen={setLastIcon}
+    />}
+
+    {isEmpty(doc) && !drag.current && <p className="draw-empty" aria-hidden="true">Pick a tool and start drawing. Press R for a box.</p>}
+
+    <div className="draw-corner">
+      <button type="button" aria-label="Undo" title="Undo (⌘Z)" disabled={!canUndo} onClick={onUndo}>↶</button>
+      <button type="button" aria-label="Redo" title="Redo (⇧⌘Z)" disabled={!canRedo} onClick={onRedo}>↷</button>
+      <span className="toolbar-divider" aria-hidden="true" />
+      <button type="button" aria-label="Zoom out" disabled={zoom === zoomSteps[0]} onClick={() => zoomBy(-1)}>−</button>
+      <button type="button" className="zoom-level" aria-label="Reset zoom" title="Reset zoom" onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</button>
+      <button type="button" aria-label="Zoom in" disabled={zoom === zoomSteps.at(-1)} onClick={() => zoomBy(1)}>+</button>
+    </div>
+    <p className="draw-hint">{active.hint}</p>
+    {message && <p className="draw-toast" role="status">{message}</p>}
+  </div>;
+}
