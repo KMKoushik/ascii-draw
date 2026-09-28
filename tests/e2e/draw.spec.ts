@@ -386,3 +386,22 @@ test("clicking one member of a selected group narrows to it; shift-click removes
   await expect(page.getByLabel("Box properties")).toBeVisible();
   await expect(page.getByText("2 selected")).toHaveCount(0);
 });
+
+test("drawing on an opened link autosaves to the same link", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Draw", exact: true }).click();
+  const created = await (await page.request.post("/api/diagrams", { data: { title: "Live link", spec: example } })).json();
+  await page.goto(created.url);
+  await expect(page.getByRole("textbox", { name: "Title" })).toHaveValue("Live link");
+  await expect(page.getByLabel("Save status")).toHaveText("Saved");
+  const g = await grid(page);
+  await page.getByRole("button", { name: "Box", exact: true }).click();
+  await g.drag([82, 4], [100, 8]);
+  await page.keyboard.type("ADDED LIVE");
+  await page.keyboard.press("Escape");
+  await expect(page.getByLabel("Save status")).toHaveText("Saved", { timeout: 10000 });
+  await page.screenshot({ path: "test-results/draw-live-link.png" });
+  const stored = await (await page.request.get(created.url.replace("/d/", "/api/diagrams/"))).json();
+  expect(stored.spec.boxes.map((b: { title: string }) => b.title)).toContain("ADDED LIVE");
+  expect(page.url()).toBe(created.url);
+});

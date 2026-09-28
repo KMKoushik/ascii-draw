@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createDiagram, hash, HttpError, newToken, primary, rateLimit, readDiagram, secureEqual, shareUrl, updateDiagram, type Env } from "./store";
+import { createDiagram, hash, HttpError, newToken, primary, rateLimit, rateLimitUpdates, readDiagram, secureEqual, shareUrl, updateDiagram, type Env } from "./store";
 import { mcpHandler } from "./mcp";
 import { oembed, previewImage, withPreviewTags } from "./og";
 
@@ -82,7 +82,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext) {
 
   const updateTarget = pathname.match(new RegExp(`^/api/diagrams/(${idPattern})$`));
   if (updateTarget && method === "PUT") {
-    await rateLimit(env, request);
+    await rateLimitUpdates(env, request);
     const payload = updateSchema.safeParse(await readBody(request));
     if (!payload.success) throw new HttpError(400, payload.error.issues[0].message);
     const updated = await updateDiagram(env, url.origin, updateTarget[1], url.searchParams.get("token"), payload.data);

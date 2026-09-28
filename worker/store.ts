@@ -1,7 +1,7 @@
 import { validateSpec, type Spec } from "../shared/spec";
 
 // PUBLISH_API_KEY is an operator-only secret for rotate/revoke. Publishing itself is open.
-export interface Env { DB: D1Database; ASSETS: Fetcher; PUBLISH_API_KEY: string; PUBLISH_LIMITER: RateLimit }
+export interface Env { DB: D1Database; ASSETS: Fetcher; PUBLISH_API_KEY: string; PUBLISH_LIMITER: RateLimit; UPDATE_LIMITER: RateLimit }
 export type Row = { id: string; title: string; spec: string; token_hash: string; created_at: string; expires_at: string | null; revoked_at: string | null };
 export type Published = { id: string; url: string; title: string; createdAt: string; expiresAt: string | null };
 
@@ -29,6 +29,12 @@ export function shareUrl(origin: string, id: string, token: string) {
   const url = new URL(`/d/${id}`, origin);
   url.searchParams.set("token", token);
   return url.href;
+}
+
+// The editor autosaves, so updates get a more generous budget than new links.
+export async function rateLimitUpdates(env: Env, request: Request) {
+  const client = request.headers.get("CF-Connecting-IP") ?? "unknown";
+  if (!(await env.UPDATE_LIMITER.limit({ key: client })).success) throw new HttpError(429, "Too many saves. Try again in a moment.");
 }
 
 export async function rateLimit(env: Env, request: Request) {

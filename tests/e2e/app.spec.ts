@@ -82,7 +82,7 @@ test("expired links deny future reads", async ({ request }) => {
   expect((await request.get(created.url)).status()).toBe(404);
 });
 
-test("paste/edit, share, copy: no key, edits need a new share", async ({ page, context }) => {
+test("paste/edit, share, copy; the link opens the editor and edits autosave to it", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
@@ -102,29 +102,35 @@ test("paste/edit, share, copy: no key, edits need a new share", async ({ page, c
   const url = await link.inputValue();
   await expect(page.getByRole("button", { name: "Copied ✓" })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(url);
-  await expect(page.getByText(/publishing key/i)).toHaveCount(0);
+  expect(page.url()).toBe(url);
+  await expect(page.getByLabel("Save status")).toHaveText("Saved");
 
   const edited = { ...example, texts: [...example.texts, { x: 40, y: 22, value: "EDITED", color: "#ffd15b" }] };
   await editor.fill(JSON.stringify(edited, null, 2));
-  await page.getByRole("button", { name: "Share again →" }).click();
-  await expect(link).toBeVisible();
-  await expect(link).not.toHaveValue(url);
-  const editedUrl = await link.inputValue();
+  await page.getByRole("textbox", { name: "Title" }).fill("Agent to browser v2");
+  await expect(page.getByLabel("Save status")).toHaveText("Saved", { timeout: 10000 });
+  await expect(link).toHaveValue(url);
+  let stored = await (await page.request.get(apiUrl(url))).json();
+  expect(stored).toMatchObject({ title: "Agent to browser v2", spec: edited });
+
+  await editor.fill("{ broken");
+  await expect(page.getByLabel("Save status")).toHaveText("Not saved: fix errors");
+  stored = await (await page.request.get(apiUrl(url))).json();
+  expect(stored.spec).toEqual(edited);
 
   await page.goto(url);
-  await expect(page.locator("canvas")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Agent to browser" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Title" })).toHaveValue("Agent to browser v2");
+  await expect(page.getByRole("textbox", { name: "Diagram JSON" })).toHaveValue(/EDITED/);
+  expect(JSON.parse(await page.getByRole("textbox", { name: "Diagram JSON" }).inputValue())).toEqual(edited);
+  await expect(page.getByLabel("Save status")).toHaveText("Saved");
+  await page.getByRole("button", { name: "Draw", exact: true }).click();
+  await expect(page.getByLabel("Drawing canvas")).toBeVisible();
   const pngPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Download PNG" }).click();
+  await page.getByRole("button", { name: "PNG ↓" }).click();
   const bytes = await readFile((await (await pngPromise).path())!);
   expect(bytes.subarray(1, 4).toString()).toBe("PNG");
   expect(bytes.readUInt32BE(16)).toBeGreaterThan(500);
   expect(bytes.readUInt32BE(20)).toBeGreaterThan(300);
-  const jsonPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Download JSON" }).click();
-  expect(JSON.parse(await readFile((await (await jsonPromise).path())!, "utf8"))).toEqual(example);
-  const shared = await (await page.request.get(apiUrl(editedUrl))).json();
-  expect(shared.spec).toEqual(edited);
   expect(errors).toEqual([]);
 });
 
@@ -149,11 +155,13 @@ test("icons render in the editor preview, the shared view, and the PNG", async (
 
   const created = await publish(request, { spec: iconSpec });
   await page.goto(created.url);
+  await expect(page.getByRole("textbox", { name: "Diagram JSON" })).toHaveValue(/HYBRID ICONS/);
+  expect(JSON.parse(await page.getByRole("textbox", { name: "Diagram JSON" }).inputValue())).toEqual(iconSpec);
   await expect(page.locator("canvas")).toBeVisible();
   await expect(page.getByRole("link", { name: "Icon license" })).toBeVisible();
   await expect.poll(() => iconPixels(page)).toBeGreaterThan(50);
   const download = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Download PNG" }).click();
+  await page.getByRole("button", { name: "PNG ↓" }).click();
   expect((await download).suggestedFilename()).toMatch(/\.png$/);
 });
 

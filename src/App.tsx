@@ -5,11 +5,10 @@ import { Textarea } from "./components/ui/textarea";
 import { DiagramCanvas } from "./components/DiagramCanvas";
 import { DrawEditor } from "./components/DrawEditor";
 import { validateSpec, type Spec } from "../shared/spec";
-import { savePng, saveText } from "./lib/render";
+import { renderCanvas, savePng } from "./lib/render";
 import example from "../shared/example.json";
 
 type SharedDiagram = { id: string; title: string; spec: Spec; createdAt: string; expiresAt: string | null };
-type Published = { url: string; raw: string; title: string };
 
 const maxFileBytes = 250 * 1024;
 const starter = JSON.stringify(example, null, 2);
@@ -50,18 +49,37 @@ function readMode(): Mode {
   try { return localStorage.getItem(modeStorage) === "json" ? "json" : "draw"; } catch { return "draw"; }
 }
 
-function Share() {
-  const [raw, setRaw] = useState(starter);
+type Linked = { id: string; token: string; url: string };
+type SaveState = "saved" | "saving" | "pending" | "invalid" | "error";
+type Snapshot = { raw: string; title: string };
+
+function linkFrom(url: string): Linked | null {
+  try {
+    const parsed = new URL(url);
+    const id = parsed.pathname.match(/^\/d\/([a-f0-9-]{36})$/)?.[1];
+    const token = parsed.searchParams.get("token");
+    return id && token ? { id, token, url: parsed.href } : null;
+  } catch { return null; }
+}
+
+function Editor({ doc }: { doc?: SharedDiagram & { token: string } }) {
+  const initialRaw = doc ? JSON.stringify(doc.spec, null, 2) : starter;
+  const initialTitle = doc?.title ?? defaultTitle;
+  const [raw, setRaw] = useState(initialRaw);
   const [mode, setModeState] = useState<Mode>(readMode);
-  const [title, setTitle] = useState(defaultTitle);
+  const [title, setTitle] = useState(initialTitle);
   const [busy, setBusy] = useState(false);
-  const [published, setPublished] = useState<Published | null>(null);
+  const [link, setLink] = useState<Linked | null>(doc ? { id: doc.id, token: doc.token, url: location.href } : null);
+  const [saved, setSaved] = useState<Snapshot | null>(doc ? { raw: initialRaw, title: initialTitle } : null);
+  const [saveState, setSaveState] = useState<SaveState>("saved");
+  const [retry, setRetry] = useState(0);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
   const [, setHistoryVersion] = useState(0);
   const fileInput = useRef<HTMLInputElement>(null);
   const rawRef = useRef(raw);
+  const saving = useRef(false);
   const history = useRef({ undo: [] as string[], redo: [] as string[], key: undefined as string | undefined, time: 0 });
   rawRef.current = raw;
 
@@ -70,8 +88,10 @@ function Share() {
   const source = mode === "draw" ? raw : deferred;
   const parsed = useMemo(() => parse(source), [source]);
   const finalTitle = title.trim() || defaultTitle;
-  const stale = !!published && (published.raw !== raw || published.title !== finalTitle);
-  const canShare = !!parsed.value && source === raw && !busy && (!published || stale);
+  const dirty = !!link && (!saved || saved.raw !== raw || saved.title !== finalTitle);
+  const canShare = !!parsed.value && source === raw && !busy && !link;
+
+  useEffect(() => { document.title = link ? `${finalTitle} · ascii-diagram` : "ascii-diagram"; }, [link, finalTitle]);
 
   function setMode(next: Mode) {
     setModeState(next);
@@ -110,6 +130,51 @@ function Share() {
   const undo = useCallback(() => step("undo"), [step]);
   const redo = useCallback(() => step("redo"), [step]);
 
+  // Linked diagrams autosave: the link always shows the latest valid version.
+  useEffect(() => {
+    if (!link) return;
+    if (!dirty) { setSaveState(state => state === "error" ? state : "saved"); return; }
+    if (!parsed.value || source !== raw) { setSaveState(parsed.value ? "pending" : "invalid"); return; }
+    setSaveState("pending");
+    const snapshot = { raw, title: finalTitle };
+    const spec = parsed.value.spec;
+    const timer = setTimeout(async () => {
+      if (saving.current) { setRetry(n => n + 1); return; }
+      saving.current = true;
+      setSaveState("saving");
+      try {
+        const response = await fetch(`/api/diagrams/${link.id}?token=${encodeURIComponent(link.token)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: snapshot.title, spec }),
+        });
+        if (response.status === 429) { setSaveState("error"); setTimeout(() => setRetry(n => n + 1), 5000); return; }
+        if (!response.ok) {
+          const result = await response.json().catch(() => ({})) as { error?: string };
+          setSaveState("error");
+          setError(response.status === 404 ? "This link no longer accepts edits (expired or revoked). Share again for a new link." : result.error ?? "Couldn’t save. Retrying…");
+          if (response.status !== 404) setTimeout(() => setRetry(n => n + 1), 5000);
+          return;
+        }
+        setError("");
+        setSaved(snapshot);
+      } catch {
+        setSaveState("error");
+        setTimeout(() => setRetry(n => n + 1), 5000);
+      } finally {
+        saving.current = false;
+      }
+    }, 900);
+    return () => clearTimeout(timer);
+  }, [link, dirty, parsed, source, raw, finalTitle, retry]);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); };
+    addEventListener("beforeunload", warn);
+    return () => removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
   useEffect(() => {
     if (mode !== "draw") return;
     function onPaste(event: ClipboardEvent) {
@@ -139,8 +204,15 @@ function Share() {
     try { replace(JSON.stringify(JSON.parse(raw), null, 2)); } catch { /* button is disabled for invalid JSON */ }
   }
 
+  async function downloadPng() {
+    if (!parsed.value) return;
+    try { await savePng(await renderCanvas(parsed.value.spec, parsed.value.diagram), `${fileName(finalTitle)}.png`); }
+    catch (error) { setError((error as Error).message); }
+  }
+
   async function share(event: FormEvent) {
     event.preventDefault();
+    if (link) { setCopied(await copy(link.url)); return; }
     if (!canShare || !parsed.value) return;
     setBusy(true);
     setError("");
@@ -152,9 +224,14 @@ function Share() {
       });
       const result = await response.json().catch(() => ({})) as { url?: string; error?: string };
       if (response.status === 429) throw new Error("Too many shares from this network. Try again in a minute.");
-      if (!response.ok || !result.url) throw new Error(result.error ?? "Couldn’t share. Try again.");
-      setPublished({ url: result.url, raw, title: finalTitle });
-      setCopied(await copy(result.url));
+      const created = result.url ? linkFrom(result.url) : null;
+      if (!response.ok || !created) throw new Error(result.error ?? "Couldn’t share. Try again.");
+      // From here on this page is the diagram's link, and edits save to it.
+      history.current.key = undefined;
+      window.history.replaceState(null, "", created.url);
+      setLink(created);
+      setSaved({ raw, title: finalTitle });
+      setCopied(await copy(created.url));
     } catch (error) {
       setError((error as Error).message);
     } finally {
@@ -163,13 +240,16 @@ function Share() {
   }
 
   const status = parsed.value ? <span className="good">[ valid ]</span> : parsed.error ? <span className="bad">[ invalid ]</span> : null;
+  // Derived so the label never claims "Saved" in the moment before a save starts.
+  const shownState: SaveState = dirty && saveState === "saved" ? (parsed.value ? "pending" : "invalid") : !dirty && saveState !== "error" ? "saved" : saveState;
+  const saveLabel = { saved: "Saved", saving: "Saving…", pending: "Unsaved changes", invalid: "Not saved: fix errors", error: "Couldn’t save" }[shownState];
   const titleInput = <input name="title" aria-label="Title" maxLength={160} placeholder={defaultTitle} value={title} onChange={event => setTitle(event.target.value)} className="title-input" />;
   const shareBar = <form className="share-bar" onSubmit={share}>
-    {published && !stale ? <>
-      <input name="share-link" aria-label="Share link" readOnly value={published.url} onFocus={event => event.target.select()} className="link-input" />
-      <a href={published.url} target="_blank" rel="noreferrer" className="link" aria-label="Open link in a new tab">Open ↗</a>
-      <Button size="sm" className="primary" onClick={async () => setCopied(await copy(published.url))}>{copied ? "Copied ✓" : "Copy link"}</Button>
-    </> : <Button type="submit" size="sm" className="primary" disabled={!canShare}>{busy ? "Sharing…" : stale ? "Share again →" : "Share →"}</Button>}
+    {link ? <>
+      <span className={`save-state ${shownState}`} role="status" aria-label="Save status">{saveLabel}</span>
+      <input name="share-link" aria-label="Share link" readOnly value={link.url} onFocus={event => event.target.select()} className="link-input" />
+      <Button type="submit" size="sm" className="primary">{copied ? "Copied ✓" : "Copy link"}</Button>
+    </> : <Button type="submit" size="sm" className="primary" disabled={!canShare}>{busy ? "Sharing…" : "Share →"}</Button>}
   </form>;
   const dropProps = {
     "data-dragging": dragging || undefined,
@@ -193,7 +273,9 @@ function Share() {
         <button type="button" aria-pressed={mode === "json"} onClick={() => setMode("json")}>JSON</button>
       </div>
       <div className="topbar-actions">
+        {link && <a href="/" className="link" title="Start a new diagram">New</a>}
         <button type="button" className="link" onClick={() => fileInput.current?.click()}>Upload ↑</button>
+        <button type="button" className="link" disabled={!parsed.value} onClick={() => void downloadPng()}>PNG ↓</button>
         <button type="button" className="link" disabled={!raw} onClick={() => { replace(""); if (mode === "json") setTitle(""); }}>Clear</button>
         <a href="/docs" className="link">API</a>
         {shareBar}
@@ -239,6 +321,7 @@ function Share() {
         <div className="pane-bar">
           <span className="pane-title">Preview</span>
           {parsed.value && <span className="dim">{parsed.value.spec.canvas.width} × {parsed.value.spec.canvas.height}</span>}
+          {!!parsed.value?.diagram.icons.length && <a href="/licenses/TABLER-ICONS-LICENSE.txt" className="link push-end" download>Icon license ↓</a>}
         </div>
         <div className="stage">
           {parsed.value
@@ -252,11 +335,10 @@ function Share() {
   </div>;
 }
 
-function Viewer({ id }: { id: string }) {
-  const [diagram, setDiagram] = useState<SharedDiagram | null>(null);
+// A share link opens the editor on that diagram; edits save back to the same link.
+function SharedEditor({ id }: { id: string }) {
+  const [doc, setDoc] = useState<(SharedDiagram & { token: string }) | null>(null);
   const [error, setError] = useState("");
-  const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
-  const [copied, setCopied] = useState(false);
   const token = new URLSearchParams(location.search).get("token");
 
   useEffect(() => {
@@ -265,53 +347,26 @@ function Viewer({ id }: { id: string }) {
     fetch(`/api/diagrams/${id}?token=${encodeURIComponent(token)}`, { signal: controller.signal, cache: "no-store" })
       .then(async response => {
         if (!response.ok) throw new Error("This link is invalid, expired, or revoked. Ask the sender for a new one.");
-        const result = await response.json() as SharedDiagram;
-        setDiagram(result);
-        document.title = `${result.title} · ascii-diagram`;
+        setDoc({ ...(await response.json() as SharedDiagram), token });
       })
       .catch(error => { if (error.name !== "AbortError") setError(error.message); });
-    return () => { controller.abort(); document.title = "ascii-diagram"; };
+    return () => controller.abort();
   }, [id, token]);
 
-  const value = useMemo(() => {
-    if (!diagram) return null;
-    try { return validateSpec(diagram.spec); } catch { return null; }
-  }, [diagram]);
-
-  if (error) return <div className="locked">
-    <Panel title="Private diagram" tone="yellow" className="locked-panel">
-      <p className="lock-mark" aria-hidden="true">[ × ]</p>
-      <h1>You need the full link.</h1>
-      <p className="lede">{error}</p>
-    </Panel>
+  if (doc) return <Editor doc={doc} />;
+  return <div className="app isolate">
+    <Header path={location.pathname} />
+    <main className="page">
+      {error ? <div className="locked">
+        <Panel title="Private diagram" tone="yellow" className="locked-panel">
+          <p className="lock-mark" aria-hidden="true">[ × ]</p>
+          <h1>You need the full link.</h1>
+          <p className="lede">{error}</p>
+        </Panel>
+      </div> : <p className="loading" role="status">[ opening diagram… ]</p>}
+    </main>
+    <footer className="footer"><span>[ ascii-diagram ]</span></footer>
   </div>;
-  if (!diagram) return <p className="loading" role="status">[ checking access… ]</p>;
-
-  const filename = fileName(diagram.title);
-  const created = new Date(diagram.createdAt).toLocaleDateString(undefined, { dateStyle: "medium" });
-  const expires = diagram.expiresAt ? ` · Expires ${new Date(diagram.expiresAt).toLocaleDateString(undefined, { dateStyle: "medium" })}` : "";
-
-  return <>
-    <div className="viewer-head">
-      <div className="intro">
-        <h1>{diagram.title}</h1>
-        <p className="lede">Shared {created}{expires}</p>
-      </div>
-      <div className="actions">
-        <button type="button" className="link" onClick={async () => setCopied(await copy(location.href))}>{copied ? "Copied ✓" : "Copy link"}</button>
-        <Button className="primary" disabled={!canvas} onClick={() => canvas && void savePng(canvas, `${filename}.png`)}>Download PNG ↓</Button>
-      </div>
-    </div>
-    <div className="stage framed">
-      {value
-        ? <DiagramCanvas spec={value.spec} diagram={value.diagram} label={diagram.title} onReady={setCanvas} />
-        : <p className="frame-error" role="alert">This diagram can’t be rendered.</p>}
-    </div>
-    <div className="viewer-foot">
-      <button type="button" className="link" onClick={() => saveText(JSON.stringify(diagram.spec, null, 2) + "\n", `${filename}.json`, "application/json")}>Download JSON ↓</button>
-      {!!value?.diagram.icons.length && <a href="/licenses/TABLER-ICONS-LICENSE.txt" download>Icon license ↓</a>}
-    </div>
-  </>;
 }
 
 function Docs() {
@@ -360,7 +415,7 @@ claude mcp add --transport http ascii-diagram ${origin}/mcp
   -H "Content-Type: application/json" \\
   -d '{ "spec": { … } }'`}</pre>
       <p>Replaces the diagram's spec. The link stays the same and shows the new version. <code>title</code> is optional; omit it to keep the current one. Returns <code>200</code> with the same fields as publishing.</p>
-      <p>Anyone with the full link can update. A wrong, expired, or revoked token returns <code>404</code>. Shares the publish rate limit.</p>
+      <p>Anyone with the full link can update. The editor autosaves this way when you open a link. A wrong, expired, or revoked token returns <code>404</code>. Limit: 120 updates per minute per IP.</p>
     </section>
 
     <section>
@@ -385,11 +440,12 @@ export default function App() {
   const shared = path.match(/^\/d\/([a-f0-9-]{36})$/);
   const docs = path === "/docs";
   useEffect(() => { try { localStorage.removeItem("diagram-link:publish-key"); } catch { /* storage unavailable */ } }, []);
-  if (!shared && !docs) return <Share />;
+  if (shared) return <SharedEditor id={shared[1]} />;
+  if (!docs) return <Editor />;
 
   return <div className="app isolate">
     <Header path={path} />
-    <main className={docs ? "page" : "page wide"}>{shared ? <Viewer id={shared[1]} /> : <Docs />}</main>
+    <main className="page"><Docs /></main>
     <footer className="footer"><span>[ ascii-diagram ]</span></footer>
   </div>;
 }

@@ -10,6 +10,8 @@ UI components are adapted from [ascii-cn](https://ascii.kdawg.dev/). The grid en
 
 Open the app, draw the diagram (or paste/upload JSON), set the title, press **Share →**, and copy the link. No login or key.
 
+A share link opens the full editor on that diagram. Edits autosave to the same link (the top bar shows Saved / Saving… / Unsaved changes), so the link and its Slack preview always show the latest version. Invalid JSON is never saved. Anyone with the full link can view and edit. **New** starts a fresh diagram; **PNG ↓** downloads the current drawing.
+
 **Draw** and **JSON** are two views of the same diagram JSON; edits in either show up in the other. The last-used view is remembered.
 
 Draw tools (keyboard shortcut in brackets):

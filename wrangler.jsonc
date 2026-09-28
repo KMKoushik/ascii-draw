@@ -19,6 +19,9 @@
     "database_id": "e1528dd9-566b-4b67-aa22-0b0f9c592a09",
     "migrations_dir": "migrations"
   }],
-  "ratelimits": [{ "name": "PUBLISH_LIMITER", "namespace_id": "1001", "simple": { "limit": 30, "period": 60 } }],
+  "ratelimits": [
+    { "name": "PUBLISH_LIMITER", "namespace_id": "1001", "simple": { "limit": 30, "period": 60 } },
+    { "name": "UPDATE_LIMITER", "namespace_id": "1002", "simple": { "limit": 120, "period": 60 } }
+  ],
   "observability": { "enabled": false }
 }

@@ -83,6 +83,10 @@ h1 { font-size: 1.7rem; font-weight: 500; letter-spacing: -.04em; text-wrap: bal
 .title-input::placeholder { color: #64717c; }
 .title-input:hover { border-bottom-color: #64717c66; }
 .title-input:focus-visible { outline: none; border-bottom-color: #79bdff; }
+.save-state { flex-shrink: 0; font-size: .8rem; color: #64717c; white-space: nowrap; }
+.save-state.saving, .save-state.pending { color: #929da7; }
+.save-state.invalid, .save-state.error { color: #ff9d91; }
+.push-end { margin-left: auto; }
 .share-bar { min-width: 0; display: flex; align-items: center; gap: 14px; }
 .link-input { width: 260px; min-width: 0; height: 28px; padding: 0 10px; background: #0a0e11; border: 1px solid #64717c66; color: #b9d9f7; font: inherit; font-size: .8rem; text-overflow: ellipsis; }
 .link-input:focus-visible { outline: 1px solid #79bdff; outline-offset: -1px; }
