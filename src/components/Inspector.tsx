@@ -18,13 +18,6 @@ type Path = NonNullable<Spec["connectors"]>[number];
 const ports = ["top", "right", "bottom", "left"] as const;
 const kindLabel = { box: "Box", text: "Text", icon: "Icon", connector: "Arrow", line: "Line", arrow: "Arrowhead" };
 
-// Keeps what the user typed even when the drawing rejects it, so input never jumps.
-function useDraft(value: string, ref: React.RefObject<HTMLInputElement | HTMLTextAreaElement | null>) {
-  const [draft, setDraft] = useState(value);
-  useEffect(() => { if (document.activeElement !== ref.current) setDraft(value); }, [value, ref]);
-  return [draft, setDraft] as const;
-}
-
 export function Inspector({ spec, selection, focusField, onFocused, onChange, onDelete, onSelect, onIconChosen }: Props) {
   const { kind, index } = selection;
   const key = `${kind}:${index}`;
@@ -40,7 +33,6 @@ export function Inspector({ spec, selection, focusField, onFocused, onChange, on
       <button type="button" className="link danger" onClick={onDelete}>Delete</button>
     </div>
     {kind === "box" && <BoxFields spec={spec} index={index} edit={edit} focusField={focusField} onFocused={onFocused} />}
-    {kind === "text" && <TextFields spec={spec} index={index} edit={edit} focusField={focusField} onFocused={onFocused} onDelete={onDelete} />}
     {kind === "icon" && <IconFields spec={spec} index={index} edit={edit} focusField={focusField} onFocused={onFocused} onIconChosen={onIconChosen} />}
     {(kind === "connector" || kind === "line") && <PathFields spec={spec} kind={kind} index={index} onChange={next => onChange(next, `${key}:path`)} onSelect={onSelect} />}
     {kind === "arrow" && <label className="inspector-field">
@@ -54,54 +46,23 @@ export function Inspector({ spec, selection, focusField, onFocused, onChange, on
 
 type FieldProps = { spec: Spec; index: number; edit: (field: string, mutate: (draft: Spec) => void) => boolean; focusField: string | null; onFocused: () => void };
 
-function BoxFields({ spec, index, edit, focusField, onFocused }: FieldProps) {
+function BoxFields({ spec, index, edit }: FieldProps) {
   const box = spec.boxes![index];
-  const titleRef = useRef<HTMLInputElement>(null);
-  const bodyRef = useRef<HTMLTextAreaElement>(null);
-  const [title, setTitle] = useDraft(box.title ?? "", titleRef);
-  const [body, setBody] = useDraft((box.lines ?? []).join("\n"), bodyRef);
-  useEffect(() => {
-    if (focusField === "title") { titleRef.current?.focus(); titleRef.current?.select(); onFocused(); }
-  }, [focusField, onFocused]);
   return <>
-    <label className="inspector-field">
-      <span>Title</span>
-      <input ref={titleRef} name="box-title" aria-label="Box title" value={title} placeholder="Untitled" onChange={event => {
-        setTitle(event.target.value);
-        edit("title", draft => { const value = event.target.value.replace(/[\t\r\n]/g, " "); if (value) draft.boxes![index].title = value; else delete draft.boxes![index].title; });
-      }} />
-    </label>
-    <label className="inspector-field">
-      <span>Body</span>
-      <textarea ref={bodyRef} name="box-body" aria-label="Box body" rows={3} value={body} placeholder="One line per row" onChange={event => {
-        setBody(event.target.value);
-        edit("body", draft => { const lines = event.target.value.replace(/\t/g, " ").split("\n"); if (lines.some(Boolean)) draft.boxes![index].lines = lines; else delete draft.boxes![index].lines; });
-      }} />
-    </label>
+    <p className="hint">Double-click the box to type. Tab switches title and body.</p>
     <div className="inspector-field">
       <span>Align body</span>
       <div className="segmented" role="group" aria-label="Align body">
         {(["center", "left"] as const).map(align => <button key={align} type="button" aria-pressed={(box.align ?? "center") === align} onClick={() => edit("align", draft => { draft.boxes![index].align = align; })}>{align === "center" ? "Center" : "Left"}</button>)}
       </div>
     </div>
+    <div className="inspector-field">
+      <span>Align title</span>
+      <div className="segmented" role="group" aria-label="Align title">
+        {(["center", "left"] as const).map(align => <button key={align} type="button" aria-pressed={(box.titleAlign ?? "center") === align} onClick={() => edit("titleAlign", draft => { draft.boxes![index].titleAlign = align; })}>{align === "center" ? "Center" : "Left"}</button>)}
+      </div>
+    </div>
   </>;
-}
-
-function TextFields({ spec, index, edit, focusField, onFocused, onDelete }: FieldProps & { onDelete: () => void }) {
-  const text = spec.texts![index];
-  const ref = useRef<HTMLInputElement>(null);
-  const [value, setValue] = useDraft(text.value, ref);
-  useEffect(() => {
-    if (focusField === "value") { ref.current?.focus(); ref.current?.select(); onFocused(); }
-  }, [focusField, onFocused]);
-  return <label className="inspector-field">
-    <span>Text</span>
-    <input ref={ref} name="text-value" aria-label="Label text" value={value} onChange={event => {
-      setValue(event.target.value);
-      const next = event.target.value.replace(/[\t\r\n]/g, " ");
-      if (next) edit("value", draft => { draft.texts![index].value = next; });
-    }} onBlur={() => { if (!value.trim()) onDelete(); }} />
-  </label>;
 }
 
 function IconFields({ spec, index, edit, focusField, onFocused, onIconChosen }: FieldProps & { onIconChosen: (id: string) => void }) {

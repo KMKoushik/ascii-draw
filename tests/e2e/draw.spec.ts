@@ -44,7 +44,9 @@ async function currentSpec(page: Page) {
 async function drawBox(page: Page, g: Awaited<ReturnType<typeof grid>>, from: Cell, to: Cell, title: string) {
   await page.getByRole("button", { name: "Box", exact: true }).click();
   await g.drag(from, to);
-  await page.getByLabel("Box title").fill(title);
+  await expect(page.getByLabel("Box title")).toBeFocused();
+  await page.keyboard.type(title);
+  await page.keyboard.press("Escape");
 }
 
 test("Draw is the default; draw boxes, an arrow, text and an icon, then share", async ({ page }) => {
@@ -58,7 +60,8 @@ test("Draw is the default; draw boxes, an arrow, text and an icon, then share", 
   await expect(page.getByLabel("Arrow properties")).toBeVisible();
   await page.keyboard.press("t");
   await g.click([4, 10]);
-  await page.getByLabel("Label text").fill("edge");
+  await page.keyboard.type("edge");
+  await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Icon", exact: true }).click();
   await g.click([24, 10]);
   await page.getByLabel("Search icons").fill("database");
@@ -142,7 +145,7 @@ test("colors, duplicate, double-click text, arrowhead toggle", async ({ page }) 
   await g.click([8, 4]);
   await page.keyboard.press("ControlOrMeta+d");
   await g.dblclick([4, 12]);
-  await page.getByLabel("Label text").fill("note");
+  await page.keyboard.type("note");
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Arrow", exact: true }).click();
   await g.drag([8, 4], [26, 4]);
@@ -179,4 +182,103 @@ test("draw mode fits on mobile", async ({ page }) => {
   await expect(page.getByRole("toolbar", { name: "Drawing tools" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: "test-results/draw-mobile.png" });
+});
+
+test("type straight into boxes: body, new lines, Tab to title, Text tool inside a box", async ({ page }) => {
+  const g = await blank(page);
+  await drawBox(page, g, [2, 2], [30, 8], "API");
+  await g.dblclick([10, 5]);
+  await expect(page.getByLabel("Box text")).toBeFocused();
+  await page.keyboard.type("Handles requests");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Checks auth");
+  await page.keyboard.press("Shift+Tab");
+  await expect(page.getByLabel("Box title")).toBeFocused();
+  await page.keyboard.type(" v2");
+  await page.keyboard.press("Escape");
+
+  await drawBox(page, g, [40, 2], [60, 6], "DB");
+  await page.getByRole("button", { name: "Text", exact: true }).click();
+  await g.click([48, 4]);
+  await page.keyboard.type("Postgres");
+  await page.keyboard.press("Escape");
+  await page.screenshot({ path: "test-results/draw-typing.png" });
+
+  const spec = await currentSpec(page);
+  expect(spec.boxes[0]).toMatchObject({ title: "API v2", lines: ["Handles requests", "Checks auth"] });
+  expect(spec.boxes[1]).toMatchObject({ title: "DB", lines: ["Postgres"] });
+  expect(spec.texts).toBeUndefined();
+});
+
+test("free text goes exactly where you click, and multi-line labels stack", async ({ page }) => {
+  const g = await blank(page);
+  await page.getByRole("button", { name: "Text", exact: true }).click();
+  await g.click([7, 3]);
+  await page.keyboard.type("first");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("second");
+  await page.keyboard.press("Escape");
+  await g.dblclick([20, 9]);
+  await page.keyboard.type("elsewhere");
+  await page.keyboard.press("Escape");
+  await g.dblclick([9, 3]);
+  await page.keyboard.press("Backspace");
+  await page.keyboard.press("Escape");
+  const spec = await currentSpec(page);
+  expect(spec.texts).toEqual([
+    expect.objectContaining({ x: 7, y: 3, value: "frst" }),
+    expect.objectContaining({ x: 7, y: 4, value: "second" }),
+    expect.objectContaining({ x: 20, y: 9, value: "elsewhere" }),
+  ]);
+});
+
+test("moving snaps into line with other elements; Alt skips snapping", async ({ page }) => {
+  const g = await blank(page);
+  await drawBox(page, g, [2, 2], [22, 6], "BOX");
+  await page.getByRole("button", { name: "Text", exact: true }).click();
+  await g.click([30, 10]);
+  await page.keyboard.type("hello");
+  await page.keyboard.press("Escape");
+  await page.mouse.move(...g.at([31, 10]));
+  await page.mouse.down();
+  await page.mouse.move(...g.at([12, 10]), { steps: 6 });
+  await page.screenshot({ path: "test-results/draw-snap.png" });
+  await page.mouse.up();
+  let spec = await currentSpec(page);
+  expect(spec.texts[0]).toMatchObject({ x: 10, y: 10 });
+
+  const g2 = await grid(page);
+  await page.keyboard.down("Alt");
+  await page.mouse.move(...g2.at([11, 10]));
+  await page.mouse.down();
+  await page.mouse.move(...g2.at([12, 14]), { steps: 4 });
+  await page.mouse.up();
+  await page.keyboard.up("Alt");
+  spec = await currentSpec(page);
+  expect(spec.texts[0]).toMatchObject({ x: 11, y: 14 });
+});
+
+test("typing never scrolls the canvas; labels land where clicked", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Clear" }).click();
+  const canvas = page.getByLabel("Drawing canvas");
+  await page.evaluate(() => document.fonts.ready);
+  const b = (await canvas.boundingBox())!;
+  const cw = +(await canvas.getAttribute("data-cell-width"))!, rh = +(await canvas.getAttribute("data-row-height"))!;
+  const at = (c: number, r: number): [number, number] => [b.x + (c + .5) * cw, b.y + (r + .5) * rh];
+  await page.getByRole("button", { name: "Box", exact: true }).click();
+  await page.mouse.move(...at(2, 2)); await page.mouse.down(); await page.mouse.move(...at(30, 8), { steps: 4 }); await page.mouse.up();
+  await page.keyboard.type("WORKER");
+  await page.keyboard.press("Tab");
+  await page.keyboard.type("Runs jobs");
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Text", exact: true }).click();
+  await page.mouse.click(...at(40, 4));
+  await page.keyboard.type("free label");
+  await page.waitForTimeout(80);
+  expect(await page.locator(".draw-scroll").evaluate(e => e.scrollTop)).toBe(0);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "JSON", exact: true }).click();
+  const spec = JSON.parse(await page.getByRole("textbox", { name: "Diagram JSON" }).inputValue());
+  expect(spec.texts[0]).toMatchObject({ x: 40, y: 4, value: "free label" });
 });

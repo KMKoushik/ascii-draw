@@ -14,11 +14,12 @@ Open the app, draw the diagram (or paste/upload JSON), set the title, press **Sh
 
 Draw tools (keyboard shortcut in brackets):
 
-- **Select** (V): click to select, drag to move, corner handles to resize, arrow keys to nudge (Shift for 5), Delete to remove, ⌘D to duplicate, Enter to edit. Moving a box carries everything inside it; arrows attached to boxes follow them.
-- **Box** (R): drag to draw, or click for a default size. Title, body lines, and alignment are in the properties panel.
+- **Typing is on the canvas.** Double-click anywhere (or use **Text**, T) and type where you clicked; Enter adds a line below. Double-click a box, or click it with the Text tool, to type inside it, centred as you go. The top border edits the title; Tab / Shift+Tab switches between title and body. Esc or clicking away finishes. Each finished edit is one undo step.
+- **Select** (V): click to select, drag to move, corner handles to resize, arrow keys to nudge (Shift for 5), Delete to remove, ⌘D to duplicate, Enter to edit text. Moving a box carries everything inside it; arrows attached to boxes follow them.
+- **Snapping:** while dragging, an element snaps (within one cell) to line up its left, centre, or right (top, middle, bottom) with other elements, and a guide line shows the alignment. Hold Alt to move freely.
+- **Box** (R): drag to draw, or click for a default size, then type its title straight away.
 - **Arrow** (A): drag from box to box (sides are picked automatically), or across empty space. The panel sets arrowhead on/off, route, and sides.
-- **Text** (T): click to place a label. Double-clicking empty space also adds one.
-- **Icon** (I): click to place, then search all bundled icons.
+- **Icon** (I): click to place, then search all bundled icons in the panel.
 - Colour swatches set the colour for new elements and recolour the selection. ⌘Z / ⇧⌘Z undo and redo; ⌘-scroll zooms. Pasting JSON while drawing loads it.
 
 Every edit goes through the same engine and validation as rendering. Edits that would break the diagram, such as a partial box overlap or a line through text, are refused with a message instead of being applied. The canvas size is fitted to the content automatically.
