@@ -1,4 +1,4 @@
-# Diagram Link
+# ascii-diagram
 
 An agent-first, token-protected diagram publisher. Cloudflare Workers serves the API and React app; D1 stores canonical JSON and hashed access tokens. The browser draws the PNG. No R2, KV, image service, or external runtime is needed.
 
@@ -40,6 +40,35 @@ curl https://ascii-diagram.kdawg.dev/api/diagrams \
 ```
 
 The response is `{ id, url, title, createdAt, expiresAt }`. Send the complete `url`. `title` is optional; `expiresAt` (future ISO 8601) makes the link expire. There is no listing endpoint. Publishing is rate limited to 30 per minute per IP. Agent instructions are at `/agent.md`, API docs at `/docs`, the spec reference at `/spec-format.md`.
+
+## MCP server
+
+Agents can connect over MCP (Streamable HTTP, no auth):
+
+```
+https://ascii-diagram.kdawg.dev/mcp
+```
+
+- **Claude Code:** `claude mcp add --transport http ascii-diagram https://ascii-diagram.kdawg.dev/mcp`
+- **Cursor** (`~/.cursor/mcp.json`): `{ "mcpServers": { "ascii-diagram": { "url": "https://ascii-diagram.kdawg.dev/mcp" } } }`
+- **OpenCode** (`opencode.json`): `{ "mcp": { "ascii-diagram": { "type": "remote", "url": "https://ascii-diagram.kdawg.dev/mcp" } } }`
+- **Anything else:** add a remote/HTTP MCP server with that URL. For clients that only speak stdio, use `npx mcp-remote https://ascii-diagram.kdawg.dev/mcp`.
+
+Tools:
+
+| Tool | What it does |
+|---|---|
+| `diagram_guide` | The authoring guide: workflow, composition rules, grid, full spec reference, icons, layout recipes, and fixes for every validation error. |
+| `render_diagram` | Validates a spec with the real engine and returns the exact ASCII rendering plus composition warnings. Nothing is saved. |
+| `publish_diagram` | Validates, saves, and returns the private share link (`structuredContent.url`). |
+| `get_diagram` | Opens a share link and returns its title, spec, and rendering, for revisions. |
+| `search_icons` | Finds icon ids (semantic shortcuts plus 6,000+ Tabler icons). |
+
+Also exposed: resources `ascii-diagram://guide`, `ascii-diagram://examples/architecture`, and `ascii-diagram://examples/request-flow`, plus a `draw_diagram` prompt. The server's `instructions` tell agents the workflow (guide → draft → render → fix → publish → reply with the link).
+
+The guide (`shared/mcp-guide.md`) is adapted from the ascii-diagram-png skill's spec format and composition rules, without the local renderer CLI steps. `render_diagram` warnings come from `shared/lint.ts` (compressed-list lines, long bodies, untitled or unconnected boxes, too many colours, missing `requiredLabels`). They never block publishing.
+
+The endpoint is stateless (Cloudflare's `createMcpHandler` with MCP SDK v2). It serves 2025-era and 2026-07-28 clients, answers GET with 405, and rejects browser requests from foreign origins. Publishing through MCP shares the HTTP API's rate limit.
 
 ## Local development
 

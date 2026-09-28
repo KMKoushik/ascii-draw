@@ -30,9 +30,13 @@ async function copy(text: string) {
   try { await navigator.clipboard.writeText(text); return true; } catch { return false; }
 }
 
+function Wordmark() {
+  return <a href="/" className="wordmark" aria-label="Homepage"><span>[</span> ascii-diagram <span>]</span></a>;
+}
+
 function Header({ path }: { path: string }) {
   return <header className="header">
-    <a href="/" className="wordmark" aria-label="Homepage"><span>[</span> diagram-link <span>]</span></a>
+    <Wordmark />
     <nav aria-label="Main" className="nav">
       <a href="/" aria-current={path === "/" ? "page" : undefined}>Share</a>
       <a href="/docs" aria-current={path === "/docs" ? "page" : undefined}>API</a>
@@ -174,31 +178,33 @@ function Share() {
     onDrop: (event: React.DragEvent) => { if (!event.dataTransfer.files.length) return; event.preventDefault(); setDragging(false); void loadFile(event.dataTransfer.files[0]); },
   };
 
-  return <>
-    <div className="intro intro-row">
-      <div className="intro">
-        <h1>Share a diagram.</h1>
-        <p className="lede">Draw it or paste the JSON. Share it. Copy the link.</p>
+  return <div className="editor-app isolate">
+    <header className="topbar">
+      <div className="topbar-start">
+        <Wordmark />
+        <span className="topbar-divider" aria-hidden="true" />
+        <div className="topbar-doc">
+          {titleInput}
+          {status}
+        </div>
       </div>
       <div className="mode-tabs" role="group" aria-label="Editor">
         <button type="button" aria-pressed={mode === "draw"} onClick={() => setMode("draw")}>Draw</button>
         <button type="button" aria-pressed={mode === "json"} onClick={() => setMode("json")}>JSON</button>
       </div>
-    </div>
+      <div className="topbar-actions">
+        <button type="button" className="link" onClick={() => fileInput.current?.click()}>Upload ↑</button>
+        <button type="button" className="link" disabled={!raw} onClick={() => { replace(""); if (mode === "json") setTitle(""); }}>Clear</button>
+        <a href="/docs" className="link">API</a>
+        {shareBar}
+      </div>
+    </header>
 
     <input ref={fileInput} type="file" name="diagram" accept=".json,application/json" aria-label="Diagram JSON file" className="hidden" onChange={event => { void loadFile(event.target.files?.[0]); event.target.value = ""; }} />
+    {error && <p className="error-text topbar-error" role="alert">{error}</p>}
 
-    {mode === "draw" ? <div className="workspace single">
+    {mode === "draw" ? <main className="workspace single">
       <section className="pane draw-pane" aria-label="Drawing" {...dropProps}>
-        <div className="pane-bar">
-          {titleInput}
-          {status}
-          <span className="pane-actions">
-            <button type="button" className="link" onClick={() => fileInput.current?.click()}>Upload ↑</button>
-            <button type="button" className="link" disabled={!raw} onClick={() => replace("")}>Clear</button>
-          </span>
-          {shareBar}
-        </div>
         {parsed.value || !raw.trim()
           ? <DrawEditor spec={parsed.value?.spec ?? null} diagram={parsed.value?.diagram ?? null} onCommit={commitDrawing} onUndo={undo} onRedo={redo} canUndo={history.current.undo.length > 0} canRedo={history.current.redo.length > 0} />
           : <div className="stage">
@@ -208,15 +214,12 @@ function Share() {
             </div>
           </div>}
       </section>
-    </div> : <div className="workspace">
+    </main> : <main className="workspace">
       <section className="pane editor" aria-label="JSON" {...dropProps}>
         <div className="pane-bar">
-          {titleInput}
-          {status}
+          <span className="pane-title">JSON</span>
           <span className="pane-actions">
-            <button type="button" className="link" onClick={() => fileInput.current?.click()}>Upload ↑</button>
             <button type="button" className="link" disabled={!parsed.value && !raw.trim()} onClick={format}>Format</button>
-            <button type="button" className="link" disabled={!raw} onClick={() => { replace(""); setTitle(""); }}>Clear</button>
           </span>
         </div>
         <Textarea
@@ -236,7 +239,6 @@ function Share() {
         <div className="pane-bar">
           <span className="pane-title">Preview</span>
           {parsed.value && <span className="dim">{parsed.value.spec.canvas.width} × {parsed.value.spec.canvas.height}</span>}
-          {shareBar}
         </div>
         <div className="stage">
           {parsed.value
@@ -246,10 +248,8 @@ function Share() {
               : <p className="hint">Paste diagram JSON on the left.</p>}
         </div>
       </section>
-    </div>}
-
-    {error && <p className="error-text" role="alert">{error}</p>}
-  </>;
+    </main>}
+  </div>;
 }
 
 function Viewer({ id }: { id: string }) {
@@ -267,10 +267,10 @@ function Viewer({ id }: { id: string }) {
         if (!response.ok) throw new Error("This link is invalid, expired, or revoked. Ask the sender for a new one.");
         const result = await response.json() as SharedDiagram;
         setDiagram(result);
-        document.title = `${result.title} · diagram-link`;
+        document.title = `${result.title} · ascii-diagram`;
       })
       .catch(error => { if (error.name !== "AbortError") setError(error.message); });
-    return () => { controller.abort(); document.title = "diagram-link"; };
+    return () => { controller.abort(); document.title = "ascii-diagram"; };
   }, [id, token]);
 
   const value = useMemo(() => {
@@ -316,12 +316,26 @@ function Viewer({ id }: { id: string }) {
 
 function Docs() {
   const origin = location.origin;
-  useEffect(() => { document.title = "API · diagram-link"; return () => { document.title = "diagram-link"; }; }, []);
+  useEffect(() => { document.title = "API · ascii-diagram"; return () => { document.title = "ascii-diagram"; }; }, []);
   return <article className="docs">
     <div className="intro">
       <h1>API</h1>
       <p className="lede">Publish diagrams from scripts and agents.</p>
     </div>
+
+    <section>
+      <h2><span>MCP</span> {origin}/mcp</h2>
+      <p>Connect any MCP client (Streamable HTTP, no auth). Agents get an authoring guide, a renderer to check their work, and a publish tool that returns the private link.</p>
+      <pre tabIndex={0}>{`# Claude Code
+claude mcp add --transport http ascii-diagram ${origin}/mcp
+
+# Cursor: ~/.cursor/mcp.json
+{ "mcpServers": { "ascii-diagram": { "url": "${origin}/mcp" } } }
+
+# OpenCode: opencode.json
+{ "mcp": { "ascii-diagram": { "type": "remote", "url": "${origin}/mcp" } } }`}</pre>
+      <p>Tools: <code>diagram_guide</code>, <code>render_diagram</code>, <code>publish_diagram</code>, <code>get_diagram</code>, <code>search_icons</code>. The guide and example specs are also available as resources, and there is a <code>draw_diagram</code> prompt.</p>
+    </section>
 
     <section>
       <h2><span>POST</span> /api/diagrams</h2>
@@ -362,11 +376,11 @@ export default function App() {
   const shared = path.match(/^\/d\/([a-f0-9-]{36})$/);
   const docs = path === "/docs";
   useEffect(() => { try { localStorage.removeItem("diagram-link:publish-key"); } catch { /* storage unavailable */ } }, []);
-  const page = shared ? <Viewer id={shared[1]} /> : docs ? <Docs /> : <Share />;
+  if (!shared && !docs) return <Share />;
 
   return <div className="app isolate">
     <Header path={path} />
-    <main className={docs ? undefined : "wide"}>{page}</main>
-    <footer className="footer"><span>[ diagram-link ]</span></footer>
+    <main className={docs ? "page" : "page wide"}>{shared ? <Viewer id={shared[1]} /> : <Docs />}</main>
+    <footer className="footer"><span>[ ascii-diagram ]</span></footer>
   </div>;
 }

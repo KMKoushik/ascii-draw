@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Spec } from "../../shared/spec";
 import type { ElementRef } from "../../shared/geometry";
-import { iconPreview, searchIcons } from "../lib/icons";
+import { iconPreview, searchIcons } from "../../shared/icons";
 
 type Props = {
   spec: Spec;

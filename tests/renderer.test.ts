@@ -43,3 +43,14 @@ describe("skill-compatible rendering", () => {
     expect(() => validateSpec({ canvas: { width: 50, height: 20 } })).toThrow("at least one");
   });
 });
+
+describe("examples and lint", () => {
+  it("request-flow example is valid and lint-clean", async () => {
+    const { lintSpec } = await import("../shared/lint");
+    const flow = (await import("../shared/example-request-flow.json")).default;
+    const { spec, diagram } = validateSpec(flow);
+    expect(diagram.text).toContain("HIT");
+    expect(lintSpec(spec)).toEqual([]);
+    expect(lintSpec(validateSpec(example).spec)).toEqual([]);
+  });
+});

@@ -1,0 +1,21 @@
+{
+  "canvas": { "width": 60, "height": 24 },
+  "texts": [
+    { "x": 9, "y": 0, "value": "REQUEST FLOW", "color": "#e8e8e5" },
+    { "x": 33, "y": 11, "value": "HIT", "color": "#7fdbca" },
+    { "x": 22, "y": 16, "value": "MISS", "color": "#ffd15b" }
+  ],
+  "boxes": [
+    { "id": "client", "centerX": 20, "y": 2, "width": 24, "height": 5, "title": "CLIENT", "lines": ["Sends a request"], "color": "#79bdff" },
+    { "id": "api", "centerX": 20, "y": 10, "width": 24, "height": 5, "title": "API", "lines": ["Checks the cache"], "color": "#c4a7ff" },
+    { "id": "cache", "x": 40, "y": 10, "width": 18, "height": 5, "title": "CACHE", "lines": ["Hot reads"], "color": "#7fdbca" },
+    { "id": "db", "centerX": 20, "y": 18, "width": 24, "height": 5, "title": "DATABASE", "lines": ["Source of truth"], "color": "#ffd15b" }
+  ],
+  "connectors": [
+    { "from": { "box": "client", "port": "bottom" }, "to": { "box": "api", "port": "top" }, "color": "#79bdff" },
+    { "from": { "box": "api", "port": "right" }, "to": { "box": "cache", "port": "left" }, "color": "#7fdbca" },
+    { "from": { "box": "api", "port": "bottom" }, "to": { "box": "db", "port": "top" }, "color": "#ffd15b" }
+  ],
+  "requiredLabels": ["CLIENT", "API", "CACHE", "DATABASE", "HIT", "MISS"],
+  "style": { "background": "#000000", "foreground": "#e8e8e5", "pointSize": 24, "lineSpacing": 2, "border": 32 }
+}

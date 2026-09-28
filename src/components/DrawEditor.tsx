@@ -106,8 +106,17 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
     return measureFont(context, baseSize * zoom, Math.round(2 * zoom));
     // fontReady re-measures once JetBrains Mono has loaded.
   }, [zoom, fontReady]); // eslint-disable-line react-hooks/exhaustive-deps
-  const cols = Math.max(view.spec.canvas.width + 40, 120);
-  const rows = Math.max(view.spec.canvas.height + 16, 44);
+  const [area, setArea] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+    const observer = new ResizeObserver(() => setArea({ width: element.clientWidth, height: element.clientHeight }));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  // The grid fills the visible area; 32 and 116 are the canvas margins in styles.css.
+  const cols = Math.max(view.spec.canvas.width + 40, 120, Math.floor((area.width - 32) / metrics.cellWidth));
+  const rows = Math.max(view.spec.canvas.height + 16, 44, Math.floor((area.height - 116) / metrics.advance));
 
   useEffect(() => {
     if (selection && docGeometry && !rectFor(docGeometry, selection)) setSelection(null);

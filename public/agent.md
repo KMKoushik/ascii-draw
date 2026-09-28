@@ -1,5 +1,11 @@
 # Publish a diagram
 
+## Preferred: MCP
+
+If your client supports MCP, connect to `https://ascii-diagram.kdawg.dev/mcp` (Streamable HTTP, no auth). Call `diagram_guide`, draft a spec, check it with `render_diagram`, then `publish_diagram`, and give the user the returned url.
+
+## HTTP API
+
 Create a JSON specification using the `ascii-diagram-png` skill format. Do not render or upload a PNG; the app renders in the viewer's browser.
 
 POST `https://ascii-diagram.kdawg.dev/api/diagrams` with:
