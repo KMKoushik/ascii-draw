@@ -121,6 +121,7 @@ h1 { font-size: 1.7rem; font-weight: 500; letter-spacing: -.04em; text-wrap: bal
 .draw-toast { position: absolute; z-index: 3; left: 50%; bottom: 60px; transform: translateX(-50%); max-width: min(520px, calc(100% - 24px)); padding: 10px 14px; background: #140b0a; border: 1px solid #ff9d9166; color: #ff9d91; font-size: .86rem; line-height: 1.6; }
 
 .draw-inspector { user-select: text; -webkit-user-select: text; position: absolute; z-index: 2; top: 64px; right: 12px; width: 256px; max-height: calc(100% - 128px); overflow: auto; display: flex; flex-direction: column; gap: 14px; padding: 14px; background: #06090b; border: 1px solid #64717c66; }
+.inspector-actions { display: flex; gap: 20px; flex-wrap: wrap; }
 .inspector-head { display: flex; align-items: center; justify-content: space-between; font-size: .86rem; }
 .danger { color: #ff9d91; }
 .inspector-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; color: #929da7; font-size: .8rem; }

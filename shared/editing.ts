@@ -1,5 +1,5 @@
 import { displayWidth } from "./engine.js";
-import { inside, rectFor, type ElementRef, type Geometry, type Point, type Rect } from "./geometry";
+import { inside, rectFor, unionRect, type ElementRef, type Geometry, type Point, type Rect } from "./geometry";
 import type { Spec } from "./spec";
 
 export type EditKind = "text" | "body" | "title";
@@ -109,20 +109,21 @@ export function offsetForColumn(value: string, column: number) {
 
 export type Guide = { axis: "x" | "y"; at: number; from: number; to: number };
 
-function rectsExcept(g: Geometry, ref: ElementRef): Rect[] {
-  const own = rectFor(g, ref);
-  const carried = (rect: Rect) => ref.kind === "box" && !!own && inside(own, rect);
-  const pick = (list: Rect[], kind: ElementRef["kind"]) => list.filter((rect, i) => !(ref.kind === kind && ref.index === i) && !carried(rect));
+function rectsExcept(g: Geometry, refs: ElementRef[]): Rect[] {
+  const containers = refs.filter(ref => ref.kind === "box").map(ref => g.boxes[ref.index]).filter(Boolean);
+  const excluded = (kind: ElementRef["kind"], index: number, rect: Rect) =>
+    refs.some(ref => ref.kind === kind && ref.index === index) || containers.some(container => inside(container, rect));
+  const pick = (list: Rect[], kind: ElementRef["kind"]) => list.filter((rect, i) => !excluded(kind, i, rect));
   return [...pick(g.boxes, "box"), ...pick(g.texts, "text"), ...pick(g.icons, "icon")];
 }
 
 const edges = (start: number, size: number) => [start, start + size / 2, start + size];
 
-// Snaps a move to the nearest left/centre/right (or top/middle/bottom) alignment within one cell.
-export function snapMove(g: Geometry, ref: ElementRef, dx: number, dy: number) {
-  const rect = rectFor(g, ref);
-  if (!rect || ref.kind === "connector" || ref.kind === "line") return { dx, dy, guides: [] as Guide[] };
-  const others = rectsExcept(g, ref);
+// Snaps a move so the selection's outline lines up (left/centre/right, top/middle/bottom) within one cell.
+export function snapMove(g: Geometry, refs: ElementRef[], dx: number, dy: number) {
+  const rect = unionRect(refs.map(ref => rectFor(g, ref)));
+  if (!rect || refs.every(ref => ref.kind === "connector" || ref.kind === "line")) return { dx, dy, guides: [] as Guide[] };
+  const others = rectsExcept(g, refs);
   const best = (axis: "x" | "y", delta: number) => {
     const moved = axis === "x" ? edges(rect.x + delta, rect.width) : edges(rect.y + delta, rect.height);
     let snap = 0;

@@ -220,69 +220,150 @@ function refreshAutoPorts(before: Geometry, spec: Spec, moved: Set<string>) {
   }
 }
 
-// Moves an element; a box carries everything drawn inside it.
-export function translate(origin: Spec, before: Geometry, ref: ElementRef, dx: number, dy: number): Spec {
-  const spec = structuredClone(origin);
-  const boxes = new Set<number>();
-  const texts = new Set<number>();
-  const icons = new Set<number>();
-  const arrows = new Set<number>();
-  const connectors = new Set<number>();
-  const lines = new Set<number>();
-  if (ref.kind === "box") {
-    const container = before.boxes[ref.index];
-    boxes.add(ref.index);
-    before.boxes.forEach((rect, i) => { if (i !== ref.index && inside(container, rect)) boxes.add(i); });
-    before.texts.forEach((rect, i) => { if (inside(container, rect)) texts.add(i); });
-    before.icons.forEach((rect, i) => { if (inside(container, rect)) icons.add(i); });
-    before.arrows.forEach((rect, i) => { if (inside(container, rect)) arrows.add(i); });
-    const pathInside = (path: Point[]) => path.every(p => containsCell(container, p));
-    (spec.connectors ?? []).forEach((path, i) => { if (pathMovable(path) && pathInside(before.connectors[i])) connectors.add(i); });
-    (spec.lines ?? []).forEach((path, i) => { if (pathMovable(path) && pathInside(before.lines[i])) lines.add(i); });
-  } else {
-    ({ text: texts, icon: icons, arrow: arrows, connector: connectors, line: lines, box: boxes } as const)[ref.kind].add(ref.index);
-  }
+type Members = Record<ElementKind, Set<number>>;
+const kinds: ElementKind[] = ["box", "text", "icon", "arrow", "connector", "line"];
+const listKey = { box: "boxes", text: "texts", icon: "icons", arrow: "arrows", connector: "connectors", line: "lines" } as const;
 
-  let minX = Infinity;
-  let minY = Infinity;
-  const consider = (rect: Rect | null) => { if (rect) { minX = Math.min(minX, rect.x); minY = Math.min(minY, rect.y); } };
-  boxes.forEach(i => consider(before.boxes[i]));
-  texts.forEach(i => consider(before.texts[i]));
-  icons.forEach(i => consider(before.icons[i]));
-  arrows.forEach(i => consider(before.arrows[i]));
-  connectors.forEach(i => consider(rectFor(before, { kind: "connector", index: i })));
-  lines.forEach(i => consider(rectFor(before, { kind: "line", index: i })));
-  dx = Math.max(dx, -minX);
-  dy = Math.max(dy, -minY);
+// Everything a move of these refs carries along: a box brings what is drawn inside it.
+function members(spec: Spec, before: Geometry, refs: ElementRef[]): Members {
+  const sets = Object.fromEntries(kinds.map(kind => [kind, new Set<number>()])) as Members;
+  for (const ref of refs) {
+    if (ref.kind !== "box") {
+      if ((ref.kind !== "connector" && ref.kind !== "line") || isMovable(spec, ref)) sets[ref.kind].add(ref.index);
+      continue;
+    }
+    const container = before.boxes[ref.index];
+    if (!container) continue;
+    sets.box.add(ref.index);
+    before.boxes.forEach((rect, i) => { if (i !== ref.index && inside(container, rect)) sets.box.add(i); });
+    before.texts.forEach((rect, i) => { if (inside(container, rect)) sets.text.add(i); });
+    before.icons.forEach((rect, i) => { if (inside(container, rect)) sets.icon.add(i); });
+    before.arrows.forEach((rect, i) => { if (inside(container, rect)) sets.arrow.add(i); });
+    const pathInside = (path: Point[]) => path.every(p => containsCell(container, p));
+    (spec.connectors ?? []).forEach((path, i) => { if (pathMovable(path) && pathInside(before.connectors[i])) sets.connector.add(i); });
+    (spec.lines ?? []).forEach((path, i) => { if (pathMovable(path) && pathInside(before.lines[i])) sets.line.add(i); });
+  }
+  return sets;
+}
+
+export function unionRect(rects: (Rect | null)[]): Rect | null {
+  const list = rects.filter((rect): rect is Rect => !!rect);
+  if (!list.length) return null;
+  const x = Math.min(...list.map(r => r.x));
+  const y = Math.min(...list.map(r => r.y));
+  return { x, y, width: Math.max(...list.map(r => r.x + r.width)) - x, height: Math.max(...list.map(r => r.y + r.height)) - y };
+}
+
+export function selectionRect(g: Geometry, refs: ElementRef[]) {
+  return unionRect(refs.map(ref => rectFor(g, ref)));
+}
+
+// Moves elements together; boxes carry everything drawn inside them.
+export function translateGroup(origin: Spec, before: Geometry, refs: ElementRef[], dx: number, dy: number): Spec {
+  const spec = structuredClone(origin);
+  const sets = members(spec, before, refs);
+  const bounds = unionRect(kinds.flatMap(kind => [...sets[kind]].map(index => rectFor(before, { kind, index }))));
+  if (!bounds) return spec;
+  dx = Math.max(dx, -bounds.x);
+  dy = Math.max(dy, -bounds.y);
 
   const movedIds = new Set<string>();
-  boxes.forEach(i => { const box = spec.boxes![i]; box.x = (box.x ?? 0) + dx; box.y += dy; if (box.id) movedIds.add(box.id); });
-  texts.forEach(i => { const text = spec.texts![i]; text.x = (text.x ?? 0) + dx; text.y += dy; });
-  icons.forEach(i => { const icon = spec.icons![i]; icon.x += dx; icon.y += dy; });
-  arrows.forEach(i => { const arrow = spec.arrows![i]; arrow.x += dx; arrow.y += dy; });
-  connectors.forEach(i => shiftPath(spec.connectors![i], dx, dy));
-  lines.forEach(i => shiftPath(spec.lines![i], dx, dy));
+  sets.box.forEach(i => { const box = spec.boxes![i]; box.x = (box.x ?? 0) + dx; box.y += dy; if (box.id) movedIds.add(box.id); });
+  sets.text.forEach(i => { const text = spec.texts![i]; text.x = (text.x ?? 0) + dx; text.y += dy; });
+  sets.icon.forEach(i => { const icon = spec.icons![i]; icon.x += dx; icon.y += dy; });
+  sets.arrow.forEach(i => { const arrow = spec.arrows![i]; arrow.x += dx; arrow.y += dy; });
+  sets.connector.forEach(i => shiftPath(spec.connectors![i], dx, dy));
+  sets.line.forEach(i => shiftPath(spec.lines![i], dx, dy));
   if (movedIds.size) {
     try { refreshAutoPorts(before, spec, movedIds); } catch { /* geometry is re-validated by the caller */ }
   }
   return spec;
 }
 
-export function removeElement(origin: Spec, ref: ElementRef): Spec {
+export function translate(origin: Spec, before: Geometry, ref: ElementRef, dx: number, dy: number): Spec {
+  return translateGroup(origin, before, [ref], dx, dy);
+}
+
+export function removeElements(origin: Spec, refs: ElementRef[]): Spec {
   const spec = structuredClone(origin);
-  if (ref.kind === "box") {
-    const id = spec.boxes![ref.index].id;
-    spec.boxes!.splice(ref.index, 1);
-    if (id) {
-      const keep = (path: Path) => !refersTo(path.from, id) && !refersTo(path.to, id);
-      spec.connectors = spec.connectors?.filter(keep);
-      spec.lines = spec.lines?.filter(keep);
-    }
-  } else {
-    const key = ({ text: "texts", icon: "icons", arrow: "arrows", connector: "connectors", line: "lines" } as const)[ref.kind];
-    spec[key]!.splice(ref.index, 1);
+  const drop = Object.fromEntries(kinds.map(kind => [kind, new Set(refs.filter(ref => ref.kind === kind).map(ref => ref.index))])) as Members;
+  const goneIds = new Set((spec.boxes ?? []).filter((box, i) => drop.box.has(i) && box.id).map(box => box.id!));
+  const keepPath = (path: Path) => ![...goneIds].some(id => refersTo(path.from, id) || refersTo(path.to, id));
+  for (const kind of kinds) {
+    const key = listKey[kind];
+    const list = spec[key] as unknown[] | undefined;
+    if (!list) continue;
+    (spec as Record<string, unknown>)[key] = list.filter((item, i) => !drop[kind].has(i) && (kind !== "connector" && kind !== "line" || keepPath(item as Path)));
   }
   return spec;
+}
+
+export function removeElement(origin: Spec, ref: ElementRef): Spec {
+  return removeElements(origin, [ref]);
+}
+
+// Copies the selection to the right of itself. Arrows between copied boxes are copied too.
+export function duplicateElements(origin: Spec, before: Geometry, refs: ElementRef[]): { spec: Spec; refs: ElementRef[] } {
+  const spec = structuredClone(origin);
+  const bounds = selectionRect(before, refs);
+  if (!bounds) return { spec, refs: [] };
+  const dx = bounds.width + 2;
+  const added: ElementRef[] = [];
+  const idMap = new Map<string, string>();
+  const push = <K extends "boxes" | "texts" | "icons" | "arrows" | "connectors" | "lines">(key: K, item: NonNullable<Spec[K]>[number], kind: ElementKind) => {
+    const list = (spec[key] ?? []) as NonNullable<Spec[K]>[number][];
+    list.push(item);
+    (spec as Record<string, unknown>)[key] = list;
+    added.push({ kind, index: list.length - 1 });
+  };
+  for (const ref of refs.filter(r => r.kind === "box")) {
+    const box = structuredClone(origin.boxes![ref.index]);
+    const id = nextBoxId(spec);
+    if (box.id) idMap.set(box.id, id);
+    push("boxes", { ...box, id, x: (box.x ?? 0) + dx }, "box");
+  }
+  for (const ref of refs) {
+    if (ref.kind === "text") { const text = origin.texts![ref.index]; push("texts", { ...text, x: (text.x ?? 0) + dx }, "text"); }
+    if (ref.kind === "icon") { const icon = origin.icons![ref.index]; push("icons", { ...icon, x: icon.x + dx }, "icon"); }
+    if (ref.kind === "arrow") { const arrow = origin.arrows![ref.index]; push("arrows", { ...arrow, x: arrow.x + dx }, "arrow"); }
+  }
+  for (const kind of ["connector", "line"] as const) {
+    const key = listKey[kind];
+    (origin[key] ?? []).forEach((path, index) => {
+      const selected = refs.some(ref => ref.kind === kind && ref.index === index);
+      const ends = [path.from, path.to].filter(Boolean) as Endpoint[];
+      const betweenCopies = ends.length === 2 && ends.every(end => !Array.isArray(end) && idMap.has(end.box));
+      if (!betweenCopies && !(selected && pathMovable(path) && ends.every(end => Array.isArray(end) || idMap.has(end.box)))) return;
+      const copy = structuredClone(path);
+      for (const end of ["from", "to"] as const) {
+        const value = copy[end];
+        if (value && !Array.isArray(value)) copy[end] = { ...value, box: idMap.get(value.box) ?? value.box };
+      }
+      if (copy.points) copy.points = copy.points.map(p => shift(p, dx, 0));
+      if (copy.via) copy.via = copy.via.map(p => shift(p, dx, 0));
+      if (isPoint(copy.from)) copy.from = shift(copy.from, dx, 0);
+      if (isPoint(copy.to)) copy.to = shift(copy.to, dx, 0);
+      push(key, copy, kind);
+    });
+  }
+  return { spec, refs: added };
+}
+
+// Elements whose whole extent lies inside the marquee.
+export function inMarquee(g: Geometry, marquee: Rect): ElementRef[] {
+  const found: ElementRef[] = [];
+  for (const kind of kinds) {
+    const count = kind === "box" ? g.boxes.length : kind === "text" ? g.texts.length : kind === "icon" ? g.icons.length : kind === "arrow" ? g.arrows.length : kind === "connector" ? g.connectors.length : g.lines.length;
+    for (let index = 0; index < count; index++) {
+      const rect = rectFor(g, { kind, index });
+      if (rect && inside(marquee, rect)) found.push({ kind, index });
+    }
+  }
+  return found;
+}
+
+export function allElements(g: Geometry): ElementRef[] {
+  return inMarquee(g, { x: -1, y: -1, width: 100000, height: 100000 });
 }
 
 export function nextBoxId(spec: Spec) {

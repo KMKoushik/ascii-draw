@@ -314,3 +314,75 @@ test("editing never shifts the page; Home/End move within the line", async ({ pa
   expect(after.texts).toContainEqual(expect.objectContaining({ x: 80, y: 3, value: "> done" }));
   expect((await page.getByLabel("Drawing canvas").count())).toBe(0);
 });
+
+test("marquee-select a group and move it together; arrows follow", async ({ page }) => {
+  const g = await blank(page);
+  await drawBox(page, g, [2, 2], [14, 6], "A");
+  await drawBox(page, g, [20, 2], [32, 6], "B");
+  await page.getByRole("button", { name: "Arrow", exact: true }).click();
+  await g.drag([8, 4], [26, 4]);
+  await page.getByRole("button", { name: "Text", exact: true }).click();
+  await g.click([44, 14]);
+  await page.keyboard.type("far");
+  await page.keyboard.press("Escape");
+
+  await g.drag([0, 0], [34, 8]);
+  await expect(page.getByText("3 selected")).toBeVisible();
+  await g.drag([8, 4], [8, 12]);
+  await page.screenshot({ path: "test-results/draw-group-move.png" });
+  const spec = await currentSpec(page);
+  expect(spec.boxes).toEqual([expect.objectContaining({ title: "A", x: 2, y: 10 }), expect.objectContaining({ title: "B", x: 20, y: 10 })]);
+  expect(spec.connectors[0]).toMatchObject({ from: { box: spec.boxes[0].id }, to: { box: spec.boxes[1].id } });
+  expect(spec.texts[0]).toMatchObject({ x: 44, y: 14, value: "far" });
+});
+
+test("shift-click, nudge, recolour, duplicate, select all, delete and undo a group", async ({ page }) => {
+  const g = await blank(page);
+  await drawBox(page, g, [2, 2], [14, 6], "A");
+  await drawBox(page, g, [20, 2], [32, 6], "B");
+  await page.getByRole("button", { name: "Arrow", exact: true }).click();
+  await g.drag([8, 4], [26, 4]);
+  await page.keyboard.press("Escape");
+  await g.click([8, 4]);
+  await page.keyboard.down("Shift");
+  await g.click([26, 4]);
+  await page.keyboard.up("Shift");
+  await expect(page.getByText("2 selected")).toBeVisible();
+  await page.keyboard.press("ArrowDown");
+  await page.getByRole("button", { name: "Color #ffd15b" }).click();
+  await page.keyboard.press("ControlOrMeta+d");
+  let spec = await currentSpec(page);
+  expect(spec.boxes.map((b: { title: string; y: number; color: string }) => [b.title, b.y, b.color])).toEqual([
+    ["A", 3, "#ffd15b"], ["B", 3, "#ffd15b"], ["A", 3, "#ffd15b"], ["B", 3, "#ffd15b"],
+  ]);
+  expect(spec.boxes[2].x).toBe(2 + 31 + 2);
+  expect(spec.connectors).toHaveLength(2);
+  expect(spec.connectors[1]).toMatchObject({ from: { box: spec.boxes[2].id }, to: { box: spec.boxes[3].id } });
+
+  const g2 = await grid(page);
+  await g2.click([60, 20]);
+  await page.keyboard.press("ControlOrMeta+a");
+  await expect(page.getByText("6 selected")).toBeVisible();
+  await page.keyboard.press("Delete");
+  await expect(page.getByText("Pick a tool and start drawing")).toBeVisible();
+  await page.keyboard.press("ControlOrMeta+z");
+  spec = await currentSpec(page);
+  expect(spec.boxes).toHaveLength(4);
+});
+
+test("clicking one member of a selected group narrows to it; shift-click removes", async ({ page }) => {
+  const g = await blank(page);
+  await drawBox(page, g, [2, 2], [14, 6], "A");
+  await drawBox(page, g, [20, 2], [32, 6], "B");
+  await g.drag([0, 0], [34, 8]);
+  await expect(page.getByText("2 selected")).toBeVisible();
+  await page.keyboard.down("Shift");
+  await g.click([26, 4]);
+  await page.keyboard.up("Shift");
+  await expect(page.getByLabel("Box properties")).toBeVisible();
+  await g.drag([0, 0], [34, 8]);
+  await expect(page.getByText("2 selected")).toBeVisible();
+  await g.click([8, 4]);
+  await expect(page.getByLabel("Box properties")).toBeVisible();
+  await expect(page.getByText("2 selected")).toHaveCount(0);
+});

@@ -4,7 +4,8 @@ import type { Diagram } from "../../shared/engine.js";
 import type { Spec } from "../../shared/spec";
 import {
   autoPorts, boxAt, emptySpec, finalize, friendlyError, geometry, hitTest, isEmpty, isMovable, nextBoxId, normalize,
-  rectFor, removeElement, requiredBoxSize, translate, type ElementRef, type Geometry, type Point, type Rect,
+  rectFor, removeElements, requiredBoxSize, translateGroup, duplicateElements, inMarquee, allElements, selectionRect,
+  type ElementRef, type Geometry, type Point, type Rect,
 } from "../../shared/geometry";
 import { loadIcon, loadedIcon, measureFont, paintCells, paintIcon } from "../lib/render";
 import {
@@ -18,7 +19,7 @@ export type Tool = "select" | "box" | "arrow" | "text" | "icon";
 export const palette = ["#e8e8e5", "#79bdff", "#ffd15b", "#b7e3a1", "#ff9d91", "#c4a7ff", "#7fdbca", "#929da7"];
 
 const tools: { id: Tool; label: string; key: string; glyph: string; hint: string }[] = [
-  { id: "select", label: "Select", key: "V", glyph: "↖", hint: "Double-click to write. Drag to move; it snaps into line. Alt skips snapping." },
+  { id: "select", label: "Select", key: "V", glyph: "↖", hint: "Drag empty space to select many. Shift-click adds. Double-click to write. Alt skips snapping." },
   { id: "box", label: "Box", key: "R", glyph: "▭", hint: "Drag to draw a box, then type its title." },
   { id: "arrow", label: "Arrow", key: "A", glyph: "→", hint: "Drag from one box to another." },
   { id: "text", label: "Text", key: "T", glyph: "T", hint: "Click anywhere and type. Click in a box to write inside it." },
@@ -32,11 +33,12 @@ const emptyDiagram: Diagram = { text: "", cells: [], pngCells: [], icons: [] };
 type Handle = "nw" | "ne" | "sw" | "se";
 type View = { spec: Spec; diagram: Diagram };
 type Drag =
-  | { type: "move"; start: Point; origin: Spec; before: Geometry; ref: ElementRef; candidate?: Spec }
+  | { type: "move"; start: Point; origin: Spec; before: Geometry; refs: ElementRef[]; clicked: ElementRef; narrow: boolean; candidate?: Spec }
+  | { type: "marquee"; start: Point; current: Point; base: ElementRef[] }
   | { type: "resize"; start: Point; origin: Spec; before: Geometry; ref: ElementRef; handle: Handle; candidate?: Spec }
   | { type: "box"; start: Point; current: Point }
   | { type: "arrow"; start: Point; startBox: number; current: Point; candidate?: Spec };
-type Ghost = { rect?: Rect; path?: Point[]; invalid?: boolean };
+type Ghost = { rect?: Rect; path?: Point[]; invalid?: boolean; marquee?: boolean };
 type Path = NonNullable<Spec["connectors"]>[number];
 type Editing = EditTarget & { value: string; start: number; end: number; invalid: boolean; id: number };
 
@@ -72,7 +74,10 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
 
   const [tool, setTool] = useState<Tool>("select");
   const [color, setColor] = useState(palette[1]);
-  const [selection, setSelection] = useState<ElementRef | null>(null);
+  const [selected, setSelected] = useState<ElementRef[]>([]);
+  // A single selection gets the inspector, resize handles, and text editing.
+  const selection = selected.length === 1 ? selected[0] : null;
+  const setSelection = useCallback((ref: ElementRef | null) => setSelected(ref ? [ref] : []), []);
   const [hover, setHover] = useState<ElementRef | null>(null);
   const [preview, setPreview] = useState<View | null>(null);
   const [ghost, setGhost] = useState<Ghost | null>(null);
@@ -119,8 +124,12 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
   const rows = Math.max(view.spec.canvas.height + 16, 44, Math.floor((area.height - 116) / metrics.advance));
 
   useEffect(() => {
-    if (selection && docGeometry && !rectFor(docGeometry, selection)) setSelection(null);
-  }, [docGeometry, selection]);
+    if (!docGeometry) return;
+    setSelected(current => {
+      const kept = current.filter(ref => rectFor(docGeometry, ref));
+      return kept.length === current.length ? current : kept;
+    });
+  }, [docGeometry]);
 
   const flash = useCallback((text: string) => {
     setMessage(text);
@@ -273,10 +282,18 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
       for (const [x, y] of pathCells(path)) context.fillRect(x * cw, y * ah, cw, ah);
     };
     const g = viewGeometry;
-    if (g && hover && !drag.current && !sameRef(hover, selection)) {
+    if (g && hover && !drag.current && !selected.some(ref => sameRef(ref, hover))) {
       const rect = rectFor(g, hover);
       if (hover.kind === "connector" || hover.kind === "line") fillPath((hover.kind === "connector" ? g.connectors : g.lines)[hover.index], "rgba(121, 189, 255, 0.10)");
       else if (rect) box(rect, "rgba(121, 189, 255, 0.35)");
+    }
+    if (g && selected.length > 1 && !editing) {
+      for (const ref of selected) {
+        if (ref.kind === "connector" || ref.kind === "line") fillPath((ref.kind === "connector" ? g.connectors : g.lines)[ref.index] ?? [], "rgba(121, 189, 255, 0.22)");
+        else { const rect = rectFor(g, ref); if (rect) box(rect, "rgba(121, 189, 255, 0.8)", [2, 3]); }
+      }
+      const group = selectionRect(g, selected);
+      if (group) box({ x: group.x - 0.5, y: group.y - 0.25, width: group.width + 1, height: group.height + 0.5 }, "#79bdff", [6, 4]);
     }
     if (g && selection && !editing) {
       const rect = rectFor(g, selection);
@@ -296,7 +313,11 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
         }
       }
     }
-    if (ghost?.rect) box(ghost.rect, ghost.invalid ? "#ff9d91" : "#79bdff", [4, 3]);
+    if (ghost?.rect && ghost.marquee) {
+      context.fillStyle = "rgba(121, 189, 255, 0.08)";
+      context.fillRect(ghost.rect.x * cw, ghost.rect.y * ah, ghost.rect.width * cw, ghost.rect.height * ah);
+      box(ghost.rect, "rgba(121, 189, 255, 0.7)", [3, 3]);
+    } else if (ghost?.rect) box(ghost.rect, ghost.invalid ? "#ff9d91" : "#79bdff", [4, 3]);
     if (ghost?.path) fillPath(ghost.path, ghost.invalid ? "rgba(255, 157, 145, 0.25)" : "rgba(121, 189, 255, 0.2)");
 
     if (editing && g) {
@@ -337,7 +358,7 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
       const bottom = (rect.y + rect.height) * ah + 2.5;
       return [handle.includes("w") ? left : right, handle.includes("n") ? top : bottom];
     }
-  }, [view, viewGeometry, metrics, cols, rows, hover, selection, ghost, iconTick, editing, caretOn, guides]);
+  }, [view, viewGeometry, metrics, cols, rows, hover, selected, selection, ghost, iconTick, editing, caretOn, guides]);
 
   function pointer(event: React.PointerEvent | React.MouseEvent) {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -415,9 +436,12 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
   }
 
   function candidateRect(d: Extract<Drag, { type: "move" | "resize" }>, cell: Point, dx: number, dy: number): Rect | null {
+    if (d.type === "move") {
+      const rect = selectionRect(d.before, d.refs);
+      return rect && { ...rect, x: Math.max(0, rect.x + dx), y: Math.max(0, rect.y + dy) };
+    }
     const rect = rectFor(d.before, d.ref);
     if (!rect) return null;
-    if (d.type === "move") return { ...rect, x: Math.max(0, rect.x + dx), y: Math.max(0, rect.y + dy) };
     try { return rectFor(geometry(normalize(resized(d, cell))), d.ref); } catch { return rect; }
   }
 
@@ -443,9 +467,22 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
         return;
       }
       const hit = hitTest(docGeometry, cell);
-      setSelection(hit);
       setFocusField(null);
-      if (hit && isMovable(doc, hit)) drag.current = { type: "move", start: cell, origin: doc, before: docGeometry, ref: hit };
+      if (!hit) {
+        const base = event.shiftKey ? selected : [];
+        if (!event.shiftKey) setSelected([]);
+        drag.current = { type: "marquee", start: cell, current: cell, base };
+        return;
+      }
+      const chosen = selected.some(ref => sameRef(ref, hit));
+      if (event.shiftKey) {
+        setSelected(chosen ? selected.filter(ref => !sameRef(ref, hit)) : [...selected, hit]);
+        return;
+      }
+      const refs = chosen ? selected : [hit];
+      if (!chosen) setSelected([hit]);
+      const movable = refs.filter(ref => isMovable(doc, ref));
+      if (movable.length) drag.current = { type: "move", start: cell, origin: doc, before: docGeometry, refs: movable, clicked: hit, narrow: chosen && refs.length > 1 };
       return;
     }
     if (tool === "box") {
@@ -481,6 +518,14 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
       setGhost({ rect: between(d.start, cell) });
       return;
     }
+    if (d.type === "marquee") {
+      d.current = cell;
+      const rect = between(d.start, cell);
+      setGhost({ rect, marquee: true });
+      const found = inMarquee(docGeometry, rect).filter(ref => !d.base.some(other => sameRef(other, ref)));
+      setSelected([...d.base, ...found]);
+      return;
+    }
     if (d.type === "arrow") {
       d.current = cell;
       const next = arrowSpec(d);
@@ -500,14 +545,14 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
     let dx = cell[0] - d.start[0];
     let dy = cell[1] - d.start[1];
     if (d.type === "move" && !event.altKey) {
-      const snapped = snapMove(d.before, d.ref, dx, dy);
+      const snapped = snapMove(d.before, d.refs, dx, dy);
       dx = snapped.dx;
       dy = snapped.dy;
       setGuides(snapped.guides);
     } else {
       setGuides([]);
     }
-    const next = d.type === "move" ? translate(d.origin, d.before, d.ref, dx, dy) : resized(d, cell);
+    const next = d.type === "move" ? translateGroup(d.origin, d.before, d.refs, dx, dy) : resized(d, cell);
     d.candidate = next;
     const result = tryView(next);
     if (result) { setPreview(result); setGhost(null); }
@@ -521,6 +566,12 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
     setGhost(null);
     setGuides([]);
     if (!d) return;
+    if (d.type === "marquee") return;
+    if (d.type === "move" && !d.candidate) {
+      // A plain click on one member of a group narrows the selection to it.
+      if (d.narrow) setSelected([d.clicked]);
+      return;
+    }
     if (d.type === "move" || d.type === "resize") {
       if (d.candidate) commit(d.candidate);
       return;
@@ -557,42 +608,30 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
   }
 
   const remove = useCallback(() => {
-    if (!selection) return;
-    if (commit(removeElement(doc, selection))) setSelection(null);
-  }, [selection, doc, commit]);
+    if (!selected.length) return;
+    if (commit(removeElements(doc, selected))) setSelected([]);
+  }, [selected, doc, commit]);
 
   const recolor = (value: string) => {
     setColor(value);
-    if (!selection) return;
+    if (!selected.length) return;
     const next = structuredClone(doc);
-    const { kind, index } = selection;
-    if (kind === "box") next.boxes![index].color = value;
-    if (kind === "text") next.texts![index].color = value;
-    if (kind === "icon") next.icons![index].color = value;
-    if (kind === "arrow") next.arrows![index].color = value;
-    if (kind === "connector") { next.connectors![index].color = value; delete next.connectors![index].arrowColor; }
-    if (kind === "line") next.lines![index].color = value;
-    commit(next, `${kind}:${index}:color`);
+    for (const { kind, index } of selected) {
+      if (kind === "box") next.boxes![index].color = value;
+      if (kind === "text") next.texts![index].color = value;
+      if (kind === "icon") next.icons![index].color = value;
+      if (kind === "arrow") next.arrows![index].color = value;
+      if (kind === "connector") { next.connectors![index].color = value; delete next.connectors![index].arrowColor; }
+      if (kind === "line") next.lines![index].color = value;
+    }
+    commit(next, `${selected.map(ref => `${ref.kind}:${ref.index}`).join(",")}:color`);
   };
 
   const duplicate = useCallback(() => {
-    if (!selection || !docGeometry) return;
-    const next = structuredClone(doc);
-    const { kind, index } = selection;
-    const rect = rectFor(docGeometry, selection);
-    if (kind === "box" && rect) {
-      next.boxes!.push({ ...structuredClone(next.boxes![index]), id: nextBoxId(next), x: rect.x + rect.width + 2 });
-      if (commit(next)) setSelection({ kind, index: next.boxes!.length - 1 });
-    } else if (kind === "text") {
-      const text = next.texts![index];
-      next.texts!.push({ ...text, y: text.y + 1 });
-      if (commit(next)) setSelection({ kind, index: next.texts!.length - 1 });
-    } else if (kind === "icon") {
-      const icon = next.icons![index];
-      next.icons!.push({ ...icon, x: icon.x + icon.width + 1 });
-      if (commit(next)) setSelection({ kind, index: next.icons!.length - 1 });
-    }
-  }, [selection, doc, docGeometry, commit]);
+    if (!selected.length || !docGeometry) return;
+    const { spec: next, refs } = duplicateElements(doc, docGeometry, selected);
+    if (refs.length && commit(next)) setSelected(refs);
+  }, [selected, doc, docGeometry, commit]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -607,9 +646,10 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
       if (mod && key === "z") { event.preventDefault(); if (event.shiftKey) onRedo(); else onUndo(); return; }
       if (mod && key === "y") { event.preventDefault(); onRedo(); return; }
       if (mod && key === "d") { event.preventDefault(); duplicate(); return; }
+      if (mod && key === "a" && docGeometry) { event.preventDefault(); setTool("select"); setSelected(allElements(docGeometry)); return; }
       if (mod || event.altKey) return;
-      if ((event.key === "Delete" || event.key === "Backspace") && selection) { event.preventDefault(); remove(); return; }
-      if (event.key === "Escape") { setSelection(null); setTool("select"); onPointerCancel(); return; }
+      if ((event.key === "Delete" || event.key === "Backspace") && selected.length) { event.preventDefault(); remove(); return; }
+      if (event.key === "Escape") { setSelected([]); setTool("select"); onPointerCancel(); return; }
       if (event.key === "Enter" && selection) {
         event.preventDefault();
         if (selection.kind === "box") startEdit({ kind: "title", index: selection.index, origin: doc });
@@ -618,17 +658,18 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
         return;
       }
       const nudges: Record<string, Point> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
-      if (nudges[event.key] && selection && docGeometry && isMovable(doc, selection)) {
+      const movable = selected.filter(ref => isMovable(doc, ref));
+      if (nudges[event.key] && movable.length && docGeometry) {
         event.preventDefault();
         const step = event.shiftKey ? 5 : 1;
-        commit(translate(doc, docGeometry, selection, nudges[event.key][0] * step, nudges[event.key][1] * step), `${selection.kind}:${selection.index}:nudge`);
+        commit(translateGroup(doc, docGeometry, movable, nudges[event.key][0] * step, nudges[event.key][1] * step), `${movable.map(ref => `${ref.kind}:${ref.index}`).join(",")}:nudge`);
         return;
       }
       if (toolKeys[key]) { setTool(toolKeys[key]); if (toolKeys[key] !== "select") setSelection(null); }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selection, doc, docGeometry, commit, remove, duplicate, onUndo, onRedo]);
+  }, [selected, selection, doc, docGeometry, commit, remove, duplicate, onUndo, onRedo]);
 
   useEffect(() => {
     const element = scrollRef.current;
@@ -749,6 +790,18 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
       <span className="toolbar-divider" aria-hidden="true" />
       {palette.map(value => <button key={value} type="button" className="swatch" aria-pressed={color === value} aria-label={`Color ${value}`} title={value} style={{ "--swatch": value } as React.CSSProperties} onClick={() => recolor(value)} />)}
     </div>
+
+    {selected.length > 1 && !editing && <div className="draw-inspector" aria-label="Selection properties">
+      <div className="inspector-head">
+        <span>{selected.length} selected</span>
+        <button type="button" className="link danger" onClick={remove}>Delete</button>
+      </div>
+      <p className="hint">Drag any of them to move them together. Arrow keys nudge. Swatches recolour all.</p>
+      <div className="inspector-actions">
+        <button type="button" className="link" onClick={duplicate}>Duplicate ⌘D</button>
+        <button type="button" className="link" onClick={() => setSelected([])}>Deselect</button>
+      </div>
+    </div>}
 
     {selection && !editing && selection.kind !== "text" && <Inspector
       key={`${selection.kind}:${selection.index}`}

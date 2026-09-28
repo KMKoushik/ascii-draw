@@ -16,6 +16,7 @@ Draw tools (keyboard shortcut in brackets):
 
 - **Typing is on the canvas.** Double-click anywhere (or use **Text**, T) and type where you clicked; Enter adds a line below. Double-click a box, or click it with the Text tool, to type inside it, centred as you go. The top border edits the title; Tab / Shift+Tab switches between title and body. Esc or clicking away finishes. Each finished edit is one undo step.
 - **Select** (V): click to select, drag to move, corner handles to resize, arrow keys to nudge (Shift for 5), Delete to remove, ⌘D to duplicate, Enter to edit text. Moving a box carries everything inside it; arrows attached to boxes follow them.
+- **Multi-select:** drag across empty space to select everything inside the rectangle (Shift adds to the selection), Shift-click to add or remove one item, ⌘A for everything. Drag any selected item to move the group together; arrow keys nudge it, Delete removes it, ⌘D duplicates it (arrows between copied boxes come too), and swatches recolour it. Clicking one member without dragging narrows the selection to it.
 - **Snapping:** while dragging, an element snaps (within one cell) to line up its left, centre, or right (top, middle, bottom) with other elements, and a guide line shows the alignment. Hold Alt to move freely.
 - **Box** (R): drag to draw, or click for a default size, then type its title straight away.
 - **Arrow** (A): drag from box to box (sides are picked automatically), or across empty space. The panel sets arrowhead on/off, route, and sides.
