@@ -88,11 +88,11 @@ h1 { font-size: 1.7rem; font-weight: 500; letter-spacing: -.04em; text-wrap: bal
 
 .workspace.single { grid-template-columns: minmax(0, 1fr); }
 .draw-pane[data-dragging] { outline: 1px solid #79bdff; outline-offset: -1px; }
-.draw-area { user-select: none; -webkit-user-select: none; position: relative; flex: 1; min-height: 0; overflow: hidden; background: #000; }
+.draw-area { user-select: none; -webkit-user-select: none; position: relative; flex: 1; min-height: 0; overflow: clip; background: #000; }
 .draw-scroll { position: absolute; inset: 0; overflow: auto; overscroll-behavior: contain; }
 .draw-scroll canvas { display: block; margin: 64px 24px 56px; touch-action: none; }
 .draw-scroll canvas:focus-visible { outline: none; }
-.draw-input { position: fixed; z-index: 1; width: 2px; padding: 0; margin: 0; border: 0; overflow: hidden; resize: none; opacity: 0; pointer-events: none; white-space: pre; background: transparent; color: transparent; caret-color: transparent; font-family: var(--font-mono); }
+.draw-input { position: fixed; z-index: 1; padding: 0; margin: 0; border: 0; overflow: hidden; resize: none; opacity: 0; pointer-events: none; white-space: pre; background: transparent; color: transparent; caret-color: transparent; font-family: var(--font-mono); }
 .draw-invalid { display: flex; flex-direction: column; align-items: center; gap: 16px; }
 
 .draw-toolbar, .draw-corner { position: absolute; z-index: 2; display: flex; align-items: center; gap: 2px; padding: 4px; background: #06090b; border: 1px solid #64717c66; }

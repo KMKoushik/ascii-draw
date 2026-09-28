@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Diagram } from "../../shared/engine.js";
 import type { Spec } from "../../shared/spec";
 import {
@@ -142,6 +143,13 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
     const next: Editing = { ...target, value, start: offset, end: offset, invalid: false, id: ++editSeq.current };
     editingRef.current = next;
     setEditing(next);
+    // Focus synchronously so keys typed straight after a double-click land in the editor.
+    const element = editorRef.current;
+    if (element) {
+      element.value = value;
+      element.focus({ preventScroll: true });
+      element.setSelectionRange(offset, offset);
+    }
     setSelection(target.kind === "text" ? null : { kind: "box", index: target.index });
     setHover(null);
     setTool("select");
@@ -586,6 +594,7 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
       }
       const mod = event.metaKey || event.ctrlKey;
       const key = event.key.toLowerCase();
+      if (target === canvasRef.current && [" ", "Home", "End", "PageUp", "PageDown"].includes(event.key)) event.preventDefault();
       if (mod && key === "z") { event.preventDefault(); if (event.shiftKey) onRedo(); else onUndo(); return; }
       if (mod && key === "y") { event.preventDefault(); onRedo(); return; }
       if (mod && key === "d") { event.preventDefault(); duplicate(); return; }
@@ -627,20 +636,24 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
     return () => element.removeEventListener("wheel", onWheel);
   }, []);
 
-  const editorStyle = useMemo<React.CSSProperties | undefined>(() => {
-    if (!editing) return undefined;
+  // The hidden input covers the text being edited, so the browser never needs to scroll
+  // anything to keep its caret in view. It is fixed to the viewport and portalled to <body>.
+  const editorStyle = useMemo<React.CSSProperties>(() => {
+    if (!editing) return { left: 0, top: 0, width: 1, height: 1 };
     const starts = lineStarts(editing, editing.value, viewGeometry);
-    const caret = caretCell(editing.value, editing.end, starts) ?? [0, 0];
-    // Fixed to the viewport so the browser never scrolls the canvas to "reveal" the hidden input.
     const bounds = canvasRef.current?.getBoundingClientRect();
+    const left = Math.min(...starts.map(start => start[0]), cols);
+    const top = starts[0]?.[1] ?? 0;
+    const lines = Math.max(1, editing.value.split("\n").length);
     return {
-      left: (bounds?.left ?? 0) + caret[0] * metrics.cellWidth,
-      top: (bounds?.top ?? 0) + caret[1] * metrics.advance,
+      left: (bounds?.left ?? 0) + left * metrics.cellWidth,
+      top: (bounds?.top ?? 0) + top * metrics.advance,
+      width: (cols + 20) * metrics.cellWidth,
+      height: (lines + 1) * metrics.advance,
       fontSize: metrics.size,
       lineHeight: `${metrics.advance}px`,
-      height: metrics.advance,
     };
-  }, [editing, viewGeometry, metrics]);
+  }, [editing, viewGeometry, metrics, cols]);
   const zoomBy = (direction: number) => setZoom(current => zoomSteps[Math.max(0, Math.min(zoomSteps.length - 1, zoomSteps.indexOf(current) + direction))]);
   const active = tools.find(item => item.id === tool)!;
   const onFocused = useCallback(() => setFocusField(null), []);
@@ -661,18 +674,20 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
         onPointerLeave={() => { if (!drag.current) setHover(null); }}
         onDoubleClick={onDoubleClick}
       />
-      {editing && <textarea
+      {createPortal(<textarea
         ref={editorRef}
         className="draw-input"
-        aria-label={editing.kind === "title" ? "Box title" : editing.kind === "body" ? "Box text" : "Text"}
-        value={editing.value}
+        tabIndex={editing ? 0 : -1}
+        aria-hidden={!editing || undefined}
+        aria-label={editing?.kind === "title" ? "Box title" : editing?.kind === "body" ? "Box text" : "Text"}
+        value={editing?.value ?? ""}
         wrap="off"
         rows={1}
         spellCheck={false}
         autoCapitalize="off"
         autoCorrect="off"
         style={editorStyle}
-        onChange={event => updateEdit(event.target.value, event.target.selectionStart, event.target.selectionEnd)}
+        onChange={event => { if (editingRef.current) updateEdit(event.target.value, event.target.selectionStart, event.target.selectionEnd); }}
         onSelect={event => {
           const element = event.currentTarget;
           const current = editingRef.current;
@@ -683,17 +698,39 @@ export function DrawEditor({ spec: specProp, diagram: diagramProp, onCommit, onU
           setCaretOn(true);
         }}
         onKeyDown={event => {
-          if (event.key === "Escape" || (event.key === "Enter" && (editing.kind === "title" || event.metaKey || event.ctrlKey))) {
+          const current = editingRef.current;
+          if (!current) return;
+          if (event.key === "Escape" || (event.key === "Enter" && (current.kind === "title" || event.metaKey || event.ctrlKey))) {
             event.preventDefault();
             finishEdit();
             canvasRef.current?.focus({ preventScroll: true });
           } else if (event.key === "Tab") {
             event.preventDefault();
             switchEdit(event.shiftKey ? "title" : "body");
+          } else if (event.key === "Home" || event.key === "End") {
+            // Handled here: the browser otherwise scrolls the whole page for these keys.
+            event.preventDefault();
+            const element = event.currentTarget;
+            const { value } = element;
+            const backward = element.selectionDirection === "backward";
+            const focus = backward ? element.selectionStart : element.selectionEnd;
+            const anchor = backward ? element.selectionEnd : element.selectionStart;
+            const lineStart = value.lastIndexOf("\n", focus - 1) + 1;
+            const lineEnd = value.indexOf("\n", focus) < 0 ? value.length : value.indexOf("\n", focus);
+            const whole = event.metaKey || event.ctrlKey;
+            const target = event.key === "Home" ? (whole ? 0 : lineStart) : (whole ? value.length : lineEnd);
+            const [start, end] = event.shiftKey ? [Math.min(anchor, target), Math.max(anchor, target)] : [target, target];
+            element.setSelectionRange(start, end, event.shiftKey && target < anchor ? "backward" : "forward");
+            const next = { ...current, start, end };
+            editingRef.current = next;
+            setEditing(next);
+            setCaretOn(true);
+          } else if (event.key === "PageUp" || event.key === "PageDown") {
+            event.preventDefault();
           }
         }}
         onBlur={finishEdit}
-      />}
+      />, document.body)}
     </div>
 
     <div className="draw-toolbar" role="toolbar" aria-label="Drawing tools">

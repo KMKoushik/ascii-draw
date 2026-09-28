@@ -282,3 +282,35 @@ test("typing never scrolls the canvas; labels land where clicked", async ({ page
   const spec = JSON.parse(await page.getByRole("textbox", { name: "Diagram JSON" }).inputValue());
   expect(spec.texts[0]).toMatchObject({ x: 40, y: 4, value: "free label" });
 });
+
+test("editing never shifts the page; Home/End move within the line", async ({ page }) => {
+  await page.goto("/");
+  const canvas = page.getByLabel("Drawing canvas");
+  await canvas.waitFor();
+  await page.evaluate(() => document.fonts.ready);
+  const b = (await canvas.boundingBox())!;
+  const cw = +(await canvas.getAttribute("data-cell-width"))!, rh = +(await canvas.getAttribute("data-row-height"))!;
+  const at = (c: number, r: number): [number, number] => [b.x + (c + .5) * cw, b.y + (r + .5) * rh];
+  const top = async () => (await canvas.boundingBox())!.y;
+  await page.mouse.dblclick(...at(10, 8)); await page.keyboard.press("End"); await page.keyboard.type(" now"); await page.keyboard.press("Escape");
+  await page.mouse.dblclick(...at(58, 6)); await page.keyboard.press("End"); await page.keyboard.type(" 2"); await page.keyboard.press("Escape");
+  expect(await top()).toBe(b.y);
+  await page.mouse.dblclick(...at(80, 3)); await page.keyboard.type("typed on canvas"); await page.keyboard.press("Escape");
+  expect(await top()).toBe(b.y);
+  await page.getByRole("button", { name: "JSON", exact: true }).click();
+  const spec = JSON.parse(await page.getByRole("textbox", { name: "Diagram JSON" }).inputValue());
+  expect(spec.texts).toContainEqual(expect.objectContaining({ x: 80, y: 3, value: "typed on canvas" }));
+  expect(spec.boxes[1].title).toBe("WORKER 2");
+  await page.getByRole("button", { name: "Draw", exact: true }).click();
+  const g = (await page.getByLabel("Drawing canvas").boundingBox())!;
+  await page.mouse.dblclick(g.x + (80.5 + 3) * cw, g.y + 3.5 * rh);
+  await page.keyboard.press("Home");
+  await page.keyboard.type("> ");
+  await page.keyboard.press("Shift+End");
+  await page.keyboard.type("done");
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "JSON", exact: true }).click();
+  const after = JSON.parse(await page.getByRole("textbox", { name: "Diagram JSON" }).inputValue());
+  expect(after.texts).toContainEqual(expect.objectContaining({ x: 80, y: 3, value: "> done" }));
+  expect((await page.getByLabel("Drawing canvas").count())).toBe(0);
+});
