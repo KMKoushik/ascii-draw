@@ -39,7 +39,17 @@ curl https://ascii-diagram.kdawg.dev/api/diagrams \
   -d '{ "title": "System architecture", "spec": { ... } }'
 ```
 
-The response is `{ id, url, title, createdAt, expiresAt }`. Send the complete `url`. `title` is optional; `expiresAt` (future ISO 8601) makes the link expire. There is no listing endpoint. Publishing is rate limited to 30 per minute per IP. Agent instructions are at `/agent.md`, API docs at `/docs`, the spec reference at `/spec-format.md`.
+The response is `{ id, url, title, createdAt, expiresAt }`. Send the complete `url`. `title` is optional; `expiresAt` (future ISO 8601) makes the link expire. There is no listing endpoint. Publishing and updating share a rate limit of 30 per minute per IP.
+
+To change a diagram in place, `PUT` a new spec to the same diagram with its token. The link stays the same. Anyone with the full link can update it.
+
+```sh
+curl -X PUT 'https://ascii-diagram.kdawg.dev/api/diagrams/<id>?token=<token>' \
+  -H 'Content-Type: application/json' \
+  -d '{ "spec": { ... } }'
+```
+
+`title` is optional and keeps the current title when omitted. The response is `200` with `{ id, url, title, createdAt, expiresAt }`. A wrong, expired, or revoked token returns 404; an invalid spec returns 422. Agent instructions are at `/agent.md`, API docs at `/docs`, the spec reference at `/spec-format.md`.
 
 ## MCP server
 
@@ -62,13 +72,14 @@ Tools:
 | `render_diagram` | Validates a spec with the real engine and returns the exact ASCII rendering plus composition warnings. Nothing is saved. |
 | `publish_diagram` | Validates, saves, and returns the private share link (`structuredContent.url`). |
 | `get_diagram` | Opens a share link and returns its title, spec, and rendering, for revisions. |
+| `update_diagram` | Validates a revised spec and saves it over an existing diagram. The share link stays the same. |
 | `search_icons` | Finds icon ids (semantic shortcuts plus 6,000+ Tabler icons). |
 
 Also exposed: resources `ascii-diagram://guide`, `ascii-diagram://examples/architecture`, and `ascii-diagram://examples/request-flow`, plus a `draw_diagram` prompt. The server's `instructions` tell agents the workflow (guide → draft → render → fix → publish → reply with the link).
 
 The guide (`shared/mcp-guide.md`) is adapted from the ascii-diagram-png skill's spec format and composition rules, without the local renderer CLI steps. `render_diagram` warnings come from `shared/lint.ts` (compressed-list lines, long bodies, untitled or unconnected boxes, too many colours, missing `requiredLabels`). They never block publishing.
 
-The endpoint is stateless (Cloudflare's `createMcpHandler` with MCP SDK v2). It serves 2025-era and 2026-07-28 clients, answers GET with 405, and rejects browser requests from foreign origins. Publishing through MCP shares the HTTP API's rate limit.
+The endpoint is stateless (Cloudflare's `createMcpHandler` with MCP SDK v2). It serves 2025-era and 2026-07-28 clients, answers GET with 405, and rejects browser requests from foreign origins. Publishing and updating through MCP share the HTTP API's rate limit.
 
 ## Local development
 
@@ -114,6 +125,7 @@ npm run deploy
 ## Access model
 
 - Each diagram gets a cryptographically random 256-bit URL token. D1 stores only its SHA-256 hash. The raw token is returned once, in the URL.
+- The token grants viewing and updating: anyone with the full link can replace the diagram's spec and title.
 - HTML access and JSON reads both validate the token. Missing, incorrect, expired, revoked, or wrong-diagram tokens all return a generic 404.
 - `POST /api/diagrams/:id/rotate-token` (admin Bearer key) returns a new URL and invalidates the previous one. Rotation restores a revoked diagram but does not extend its expiry.
 - `POST /api/diagrams/:id/revoke` (admin Bearer key) blocks subsequent reads.

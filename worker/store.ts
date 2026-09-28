@@ -49,6 +49,17 @@ export async function createDiagram(env: Env, origin: string, input: { title: st
   return { id, url: shareUrl(origin, id, token), title: input.title, createdAt, expiresAt, spec };
 }
 
+// Holding the share token is the only credential: anyone who can view can update.
+export async function updateDiagram(env: Env, origin: string, id: string, token: string | null, input: { title?: string; spec: unknown }): Promise<(Published & { spec: Spec }) | null> {
+  const row = await readDiagram(env, id, token);
+  if (!row || !token) return null;
+  let spec: Spec;
+  try { spec = validateSpec(input.spec).spec; } catch (error) { throw new HttpError(422, (error as Error).message); }
+  const title = input.title ?? row.title;
+  await primary(env).prepare("UPDATE diagrams SET spec = ?, title = ? WHERE id = ?").bind(JSON.stringify(spec), title, id).run();
+  return { id, url: shareUrl(origin, id, token), title, createdAt: row.created_at, expiresAt: row.expires_at, spec };
+}
+
 export async function readDiagram(env: Env, id: string, token: string | null) {
   if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token) || !/^[a-f0-9-]{36}$/.test(id)) return null;
   const row = await primary(env).prepare("SELECT * FROM diagrams WHERE id = ?").bind(id).first<Row>();

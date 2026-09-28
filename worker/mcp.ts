@@ -8,7 +8,7 @@ import { validateSpec, type Spec } from "../shared/spec";
 import { lintSpec } from "../shared/lint";
 import { friendlyError } from "../shared/geometry";
 import { searchIcons } from "../shared/icons";
-import { createDiagram, HttpError, rateLimit, readDiagram, type Env } from "./store";
+import { createDiagram, HttpError, rateLimit, readDiagram, updateDiagram, type Env } from "./store";
 
 const instructions = `ascii-diagram draws architecture diagrams as Unicode box art from a JSON spec and shares them as private links.
 
@@ -16,7 +16,7 @@ Workflow:
 1. If you don't know the spec format yet, call diagram_guide (or read the ascii-diagram://guide resource). It covers the grid, boxes, connectors, text, icons, composition rules, layout recipes, and error fixes.
 2. Draft a spec, then call render_diagram and read the ASCII it returns. Check every arrow reaches its target and nothing is cramped. Fix and re-render until it is clean and has no warnings you can reasonably address.
 3. Call publish_diagram with a descriptive title, then give the user the returned url as a Markdown link. Keep the whole URL including ?token= (the token is the access key; don't post it publicly).
-To change an existing diagram, call get_diagram with its link, edit the spec, render, and publish again (that gives a new link).
+To change an existing diagram, call get_diagram with its link, edit the spec, check it with render_diagram, then call update_diagram with the same link. The link stays the same; publish_diagram would make a new one.
 No authentication is needed.`;
 
 const examples = { architecture, "request-flow": requestFlow } as Record<string, unknown>;
@@ -94,7 +94,7 @@ function buildServer(env: Env, request: Request) {
 
   server.registerTool("publish_diagram", {
     title: "Publish a diagram",
-    description: "Validates and saves a spec, then returns a private share link. Anyone with the full link (including ?token=) can view it; nobody can without it. Give the user the url. Call render_diagram first to check the layout.",
+    description: "Validates and saves a new diagram, then returns a private share link. Anyone with the full link (including ?token=) can view it; nobody can without it. Give the user the url. Call render_diagram first to check the layout. To change an existing diagram, use update_diagram instead.",
     inputSchema: z.object({
       spec: specField,
       title: z.string().trim().min(1).max(160).optional().describe("Descriptive title shown on the shared page, e.g. \"Checkout architecture\". Defaults to \"Untitled diagram\"."),
@@ -120,7 +120,7 @@ function buildServer(env: Env, request: Request) {
 
   server.registerTool("get_diagram", {
     title: "Open a shared diagram",
-    description: "Loads a published diagram from its share link (https://…/d/<id>?token=…) and returns its title, spec, and ASCII rendering, so you can revise it and publish a new version.",
+    description: "Loads a published diagram from its share link (https://…/d/<id>?token=…) and returns its title, spec, and ASCII rendering, so you can revise it and save it back with update_diagram.",
     inputSchema: z.object({ url: z.string().describe("The full share link, including ?token=") }),
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, async ({ url }) => {
@@ -135,6 +135,36 @@ function buildServer(env: Env, request: Request) {
       content: [{ type: "text" as const, text: `"${row.title}" (published ${row.created_at}${row.expires_at ? `, expires ${row.expires_at}` : ""})\n\n\`\`\`text\n${rendering}\n\`\`\`\n\nSpec:\n\n\`\`\`json\n${JSON.stringify(spec, null, 2)}\n\`\`\`` }],
       structuredContent: { id: row.id, title: row.title, spec, createdAt: row.created_at, expiresAt: row.expires_at },
     };
+  });
+
+  server.registerTool("update_diagram", {
+    title: "Update a shared diagram",
+    description: "Validates a revised spec and saves it over an existing diagram. The share link stays the same and shows the new version. Anyone with the full link can update it. Call get_diagram and render_diagram first.",
+    inputSchema: z.object({
+      link: z.string().describe("The full share link, including ?token="),
+      spec: specField,
+      title: z.string().trim().min(1).max(160).optional().describe("New title. Omit to keep the current one."),
+    }),
+    outputSchema: z.object({ id: z.string(), url: z.string(), title: z.string(), createdAt: z.string(), expiresAt: z.string().nullable() }),
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  }, async ({ link, spec, title }) => {
+    const target = parseLink(link);
+    if (!target) return text("That isn't a diagram link. Expected https://…/d/<id>?token=…", true);
+    let checked;
+    try { checked = report(spec); } catch (error) { return failure(error); }
+    try {
+      await rateLimit(env, request);
+      const updated = await updateDiagram(env, origin, target.id, target.token, { title, spec: checked.spec });
+      if (!updated) return text("Diagram unavailable: the link is incomplete, expired, or revoked. Ask for the full, current link.", true);
+      const { spec: _saved, ...published } = updated;
+      return {
+        content: [{ type: "text" as const, text: `Updated "${published.title}". The same link now shows the new version:\n\n${published.url}\n\n${checked.body}` }],
+        structuredContent: published,
+      };
+    } catch (error) {
+      if (error instanceof HttpError) return text(error.status === 429 ? "Rate limited: too many changes from this network. Wait a minute and try again." : error.message, true);
+      throw error;
+    }
   });
 
   server.registerTool("search_icons", {

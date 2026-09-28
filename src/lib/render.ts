@@ -1,25 +1,13 @@
-import { loadCatalogIcon, loadSvgIconLibrary, type Diagram, type IconElement } from "../../shared/engine.js";
+import type { Diagram } from "../../shared/engine.js";
+import { iconSvg } from "../../shared/icon-svg";
 import type { Spec } from "../../shared/spec";
 
-function escape(value: string | number) {
-  return String(value).replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-}
-function elementSvg(element: IconElement) {
-  const { type, ...attributes } = element;
-  return `<${type} ${Object.entries(attributes).map(([key, value]) => `${key}="${escape(value)}"`).join(" ")}/>`;
-}
 async function iconImage(id: string, color: string) {
-  const library = loadSvgIconLibrary();
-  const definition = library.icons[id] ?? loadCatalogIcon(id);
-  let svg: string;
-  if (definition.asset) {
-    const response = await fetch(definition.asset);
+  const svg = await iconSvg(id, color, async path => {
+    const response = await fetch(path);
     if (!response.ok) throw new Error(`Could not load icon ${id}`);
-    svg = (await response.text()).replaceAll("currentColor", color);
-  } else {
-    svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${definition.elements!.map(elementSvg).join("")}</svg>`;
-    svg = svg.replaceAll("currentColor", color);
-  }
+    return response.text();
+  });
   const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
   try {
     const image = new Image();

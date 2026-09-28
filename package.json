@@ -17,6 +17,7 @@
   "dependencies": {
     "@base-ui/react": "^1.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
+    "@resvg/resvg-wasm": "^2.6.2",
     "agents": "^0.24.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

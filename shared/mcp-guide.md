@@ -13,7 +13,7 @@ You describe a diagram as one JSON **spec** on a character grid. The server lays
 2. **Draft the spec** (reference below). Start from an example resource if it helps.
 3. **Call `render_diagram`** and read the ASCII it returns, character by character. Trace every arrow from source to target. Check that labels have breathing room and that no crossing implies a relationship that doesn't exist. Fix the spec and render again; don't hand-edit the text output.
 4. **Call `publish_diagram`** with a descriptive title. Reply to the user with the returned `url` as a Markdown link. Keep the whole URL, including `?token=…`; the token is the only way to open it. Don't paste the link anywhere public.
-5. **To revise** an existing link, call `get_diagram` with its URL, edit the returned spec, render, and publish again. Publishing always makes a new link; the old one keeps working.
+5. **To revise** an existing diagram, call `get_diagram` with its URL, edit the returned spec, check it with `render_diagram`, then call `update_diagram` with the same URL. The link stays the same and shows the new version. Anyone with the full link can update it. `publish_diagram` always makes a new link instead.
 
 ## Composition rules
 
@@ -134,4 +134,4 @@ List every critical phrase (box titles, outcome labels). Rendering fails if one 
 
 ## Limits
 
-256 KiB per request · canvas up to 240 × 140 cells · 16 megapixels at the chosen point size (8–48) · 200 boxes · 300 connectors, lines, and texts each · 100 icons · 30 publishes per minute per IP.
+256 KiB per request · canvas up to 240 × 140 cells · 16 megapixels at the chosen point size (8–48) · 200 boxes · 300 connectors, lines, and texts each · 100 icons · 30 publishes or updates per minute per IP.

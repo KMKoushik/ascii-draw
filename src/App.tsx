@@ -334,7 +334,7 @@ claude mcp add --transport http ascii-diagram ${origin}/mcp
 
 # OpenCode: opencode.json
 { "mcp": { "ascii-diagram": { "type": "remote", "url": "${origin}/mcp" } } }`}</pre>
-      <p>Tools: <code>diagram_guide</code>, <code>render_diagram</code>, <code>publish_diagram</code>, <code>get_diagram</code>, <code>search_icons</code>. The guide and example specs are also available as resources, and there is a <code>draw_diagram</code> prompt.</p>
+      <p>Tools: <code>diagram_guide</code>, <code>render_diagram</code>, <code>publish_diagram</code>, <code>get_diagram</code>, <code>update_diagram</code>, <code>search_icons</code>. The guide and example specs are also available as resources, and there is a <code>draw_diagram</code> prompt.</p>
     </section>
 
     <section>
@@ -352,6 +352,15 @@ claude mcp add --transport http ascii-diagram ${origin}/mcp
   "expiresAt": null
 }`}</pre>
       <p>No auth needed. Send the complete <code>url</code>. The token in it is the only way to open the diagram. Limit: 30 shares per minute per IP.</p>
+    </section>
+
+    <section>
+      <h2><span>PUT</span> /api/diagrams/:id?token=…</h2>
+      <pre tabIndex={0}>{`curl -X PUT "${origin}/api/diagrams/…?token=…" \\
+  -H "Content-Type: application/json" \\
+  -d '{ "spec": { … } }'`}</pre>
+      <p>Replaces the diagram's spec. The link stays the same and shows the new version. <code>title</code> is optional; omit it to keep the current one. Returns <code>200</code> with the same fields as publishing.</p>
+      <p>Anyone with the full link can update. A wrong, expired, or revoked token returns <code>404</code>. Shares the publish rate limit.</p>
     </section>
 
     <section>

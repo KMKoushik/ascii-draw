@@ -1,6 +1,7 @@
 import { z } from "zod";
-import { createDiagram, hash, HttpError, newToken, primary, rateLimit, readDiagram, secureEqual, shareUrl, type Env } from "./store";
+import { createDiagram, hash, HttpError, newToken, primary, rateLimit, readDiagram, secureEqual, shareUrl, updateDiagram, type Env } from "./store";
 import { mcpHandler } from "./mcp";
+import { previewImage, withPreviewTags } from "./og";
 
 export type { Env };
 const idPattern = "[a-f0-9-]{36}";
@@ -9,6 +10,10 @@ const payloadSchema = z.object({
   title: z.string().trim().min(1).max(160).default("Untitled diagram"),
   spec: z.unknown(),
   expiresAt: z.iso.datetime({ offset: true }).nullable().optional(),
+}).strict();
+const updateSchema = z.object({
+  title: z.string().trim().min(1).max(160).optional(),
+  spec: z.unknown(),
 }).strict();
 
 function json(value: unknown, status = 200) { return Response.json(value, { status }); }
@@ -75,6 +80,17 @@ async function route(request: Request, env: Env, ctx: ExecutionContext) {
     return json({ id, url: shareUrl(url.origin, id, token) });
   }
 
+  const updateTarget = pathname.match(new RegExp(`^/api/diagrams/(${idPattern})$`));
+  if (updateTarget && method === "PUT") {
+    await rateLimit(env, request);
+    const payload = updateSchema.safeParse(await readBody(request));
+    if (!payload.success) throw new HttpError(400, payload.error.issues[0].message);
+    const updated = await updateDiagram(env, url.origin, updateTarget[1], url.searchParams.get("token"), payload.data);
+    if (!updated) return notFound();
+    const { spec: _spec, ...published } = updated;
+    return json(published);
+  }
+
   const apiDiagram = pathname.match(new RegExp(`^/api/diagrams/(${idPattern})$`));
   const viewer = pathname.match(new RegExp(`^/d/(${idPattern})$`));
   if ((apiDiagram || viewer) && (method === "GET" || method === "HEAD")) {
@@ -86,7 +102,12 @@ async function route(request: Request, env: Env, ctx: ExecutionContext) {
       return new Response(shell.body, { status: 404, headers: shell.headers });
     }
     if (apiDiagram) return json({ id: row.id, title: row.title, spec: JSON.parse(row.spec), createdAt: row.created_at, expiresAt: row.expires_at });
-    return env.ASSETS.fetch(new Request(new URL("/", request.url), { method }));
+    return withPreviewTags(await env.ASSETS.fetch(new Request(new URL("/", request.url), { method })), url, row);
+  }
+  const preview = pathname.match(new RegExp(`^/d/(${idPattern})/og\\.png$`));
+  if (preview && (method === "GET" || method === "HEAD")) {
+    const row = await readDiagram(env, preview[1], url.searchParams.get("token"));
+    return row ? previewImage(env, url.origin, row, ctx) : notFound();
   }
   if (pathname.startsWith("/api/") || pathname.startsWith("/d/")) return notFound();
   if (method !== "GET" && method !== "HEAD") return json({ error: "Method not allowed" }, 405);

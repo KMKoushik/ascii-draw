@@ -29,7 +29,7 @@ test("a 2025-era MCP client can learn, render, publish, reopen, and search", asy
   expect(client.getInstructions()).toContain("render_diagram");
 
   const tools = await client.listTools();
-  expect(tools.tools.map(tool => tool.name).sort()).toEqual(["diagram_guide", "get_diagram", "publish_diagram", "render_diagram", "search_icons"]);
+  expect(tools.tools.map(tool => tool.name).sort()).toEqual(["diagram_guide", "get_diagram", "publish_diagram", "render_diagram", "search_icons", "update_diagram"]);
   const publishTool = tools.tools.find(tool => tool.name === "publish_diagram")!;
   expect(publishTool.inputSchema.properties).toHaveProperty("spec");
   expect(publishTool.annotations?.readOnlyHint).toBe(false);
@@ -88,6 +88,34 @@ test("a 2025-era MCP client can learn, render, publish, reopen, and search", asy
   await client.close();
 });
 
+test("anyone with the link can update a diagram in place, and only with the right token", async ({ baseURL, request }) => {
+  const client = await connectV1(baseURL);
+  const published = await client.callTool({ name: "publish_diagram", arguments: { spec: example, title: "Before" } });
+  const { url } = published.structuredContent as { url: string };
+  const revised = { canvas: { width: 30, height: 8 }, boxes: [{ id: "only", x: 2, y: 1, width: 20, height: 5, title: "REVISED" }] };
+
+  const updated = await client.callTool({ name: "update_diagram", arguments: { link: url, spec: revised } });
+  expect(updated.isError).toBeFalsy();
+  expect(updated.structuredContent).toMatchObject({ url, title: "Before" });
+  expect(textOf(updated)).toContain("REVISED");
+  expect(textOf(updated)).toContain("Valid diagram");
+  const reopened = await client.callTool({ name: "get_diagram", arguments: { url } });
+  expect((reopened.structuredContent as { spec: unknown }).spec).toEqual(revised);
+
+  const apiUrl = url.replace("/d/", "/api/diagrams/");
+  const put = await request.put(apiUrl, { data: { spec: example, title: "After" } });
+  expect(put.status()).toBe(200);
+  expect(await put.json()).toMatchObject({ url, title: "After" });
+  expect(await (await request.get(apiUrl)).json()).toMatchObject({ title: "After", spec: example });
+
+  const wrongToken = apiUrl.replace(/token=.*/, `token=${"A".repeat(43)}`);
+  expect((await request.put(wrongToken, { data: { spec: revised } })).status()).toBe(404);
+  const tampered = await client.callTool({ name: "update_diagram", arguments: { link: wrongToken, spec: revised } });
+  expect(tampered.isError).toBe(true);
+  expect(await (await request.get(apiUrl)).json()).toMatchObject({ title: "After", spec: example });
+  await client.close();
+});
+
 test("resources and the draw_diagram prompt are available", async ({ baseURL }) => {
   const client = await connectV1(baseURL);
   const resources = await client.listResources();
@@ -113,7 +141,7 @@ test("a 2026-era MCP client works too", async ({ baseURL }) => {
   const client = new ClientV2({ name: "e2e-v2", version: "1.0.0" });
   await client.connect(new TransportV2(endpoint(baseURL)));
   const tools = await client.listTools();
-  expect(tools.tools.length).toBe(5);
+  expect(tools.tools.length).toBe(6);
   const result = await client.callTool({ name: "render_diagram", arguments: { spec: example } });
   expect(textOf(result)).toContain("Valid diagram");
   await client.close();
