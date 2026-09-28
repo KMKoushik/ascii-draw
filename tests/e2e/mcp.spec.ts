@@ -74,7 +74,7 @@ test("a 2025-era MCP client can learn, render, publish, reopen, and search", asy
   const reopened = await client.callTool({ name: "get_diagram", arguments: { url } });
   expect((reopened.structuredContent as { spec: unknown }).spec).toEqual(example);
   expect(textOf(reopened)).toContain("\"MCP architecture\"");
-  const tampered = await client.callTool({ name: "get_diagram", arguments: { url: url.replace(/token=./, "token=x") } });
+  const tampered = await client.callTool({ name: "get_diagram", arguments: { url: url.replace(/token=[^&]+/, "token=" + "A".repeat(43)) } });
   expect(tampered.isError).toBe(true);
   expect(textOf(tampered)).toContain("Diagram unavailable");
 

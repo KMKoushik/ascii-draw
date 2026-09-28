@@ -157,16 +157,46 @@ export async function previewImage(env: Env, origin: string, row: Row, ctx: Exec
   return response;
 }
 
-export async function withPreviewTags(shell: Response, page: URL, row: Row) {
+export async function previewImageUrl(page: URL, row: Row) {
   const image = new URL(`/d/${row.id}/og.png`, page.origin);
   image.searchParams.set("token", page.searchParams.get("token") ?? "");
   image.searchParams.set("v", await previewVersion(row));
+  return image;
+}
+
+// Slack prefers oEmbed, then uses whichever of X Card / Open Graph tags comes first in the HTML.
+// So: an oEmbed "photo" (rendered as a large image) and the X Card tags ahead of Open Graph.
+export async function oembed(page: URL, row: Row) {
+  const image = await previewImageUrl(page, row);
+  return {
+    version: "1.0",
+    type: "photo",
+    title: row.title,
+    url: image.href,
+    width,
+    height,
+    provider_name: "ascii-diagram",
+    provider_url: page.origin,
+    thumbnail_url: image.href,
+    thumbnail_width: width,
+    thumbnail_height: height,
+  };
+}
+
+export async function withPreviewTags(shell: Response, page: URL, row: Row) {
+  const image = await previewImageUrl(page, row);
+  const description = previewDescription(row);
   const tags = [
+    ["name", "twitter:card", "summary_large_image"],
+    ["name", "twitter:title", row.title],
+    ["name", "twitter:description", description],
+    ["name", "twitter:image", image.href],
+    ["name", "twitter:image:alt", row.title],
     ["property", "og:type", "website"],
     ["property", "og:site_name", "ascii-diagram"],
     ["property", "og:title", row.title],
-    ["property", "og:description", previewDescription(row)],
-    ["name", "description", previewDescription(row)],
+    ["property", "og:description", description],
+    ["name", "description", description],
     ["property", "og:url", page.href],
     ["property", "og:image", image.href],
     ["property", "og:image:secure_url", image.href],
@@ -174,13 +204,13 @@ export async function withPreviewTags(shell: Response, page: URL, row: Row) {
     ["property", "og:image:width", String(width)],
     ["property", "og:image:height", String(height)],
     ["property", "og:image:alt", row.title],
-    ["name", "twitter:card", "summary_large_image"],
-    ["name", "twitter:title", row.title],
-    ["name", "twitter:description", previewDescription(row)],
-    ["name", "twitter:image", image.href],
   ].map(([attribute, name, content]) => `<meta ${attribute}="${name}" content="${escape(content)}" />`).join("");
+  const oembedUrl = new URL("/oembed", page.origin);
+  oembedUrl.searchParams.set("url", page.href);
+  oembedUrl.searchParams.set("format", "json");
+  const link = `<link rel="alternate" type="application/json+oembed" href="${escape(oembedUrl.href)}" title="${escape(row.title)}" />`;
   return new HTMLRewriter()
     .on("title", { element(element) { element.setInnerContent(`${row.title} · ascii-diagram`); } })
-    .on("head", { element(element) { element.append(tags, { html: true }); } })
+    .on("head", { element(element) { element.prepend(link + tags, { html: true }); } })
     .transform(shell);
 }

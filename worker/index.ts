@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createDiagram, hash, HttpError, newToken, primary, rateLimit, readDiagram, secureEqual, shareUrl, updateDiagram, type Env } from "./store";
 import { mcpHandler } from "./mcp";
-import { previewImage, withPreviewTags } from "./og";
+import { oembed, previewImage, withPreviewTags } from "./og";
 
 export type { Env };
 const idPattern = "[a-f0-9-]{36}";
@@ -103,6 +103,13 @@ async function route(request: Request, env: Env, ctx: ExecutionContext) {
     }
     if (apiDiagram) return json({ id: row.id, title: row.title, spec: JSON.parse(row.spec), createdAt: row.created_at, expiresAt: row.expires_at });
     return withPreviewTags(await env.ASSETS.fetch(new Request(new URL("/", request.url), { method })), url, row);
+  }
+  if (pathname === "/oembed" && (method === "GET" || method === "HEAD")) {
+    let page: URL;
+    try { page = new URL(url.searchParams.get("url") ?? ""); } catch { return notFound(); }
+    const id = page.origin === url.origin ? page.pathname.match(new RegExp(`^/d/(${idPattern})$`))?.[1] : undefined;
+    const row = id ? await readDiagram(env, id, page.searchParams.get("token")) : null;
+    return row ? json(await oembed(page, row)) : notFound();
   }
   const preview = pathname.match(new RegExp(`^/d/(${idPattern})/og\\.png$`));
   if (preview && (method === "GET" || method === "HEAD")) {

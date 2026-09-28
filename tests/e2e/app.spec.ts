@@ -213,4 +213,17 @@ test("shared links unfurl as a large 1200×630 card with a description", async (
   expect(image.headers()["content-type"]).toBe("image/png");
   const bytes = await image.body();
   expect([bytes.readUInt32BE(16), bytes.readUInt32BE(20)]).toEqual([1200, 630]);
+
+  // Slack reads oEmbed first, then whichever of X Card / Open Graph comes first.
+  expect(page.indexOf('name="twitter:card"')).toBeLessThan(page.indexOf('property="og:title"'));
+  expect(page.indexOf('name="twitter:card"')).toBeLessThan(page.indexOf("<script"));
+  const oembedHref = page.match(/type="application\/json\+oembed" href="([^"]+)"/)?.[1]?.replaceAll("&amp;", "&");
+  expect(oembedHref).toBeTruthy();
+  const embed = await (await request.get(oembedHref!)).json();
+  expect(embed).toMatchObject({ version: "1.0", type: "photo", width: 1200, height: 630, provider_name: "ascii-diagram", title: "Private test diagram" });
+  expect(embed.url).toBe(meta("og:image")!.replaceAll("&amp;", "&"));
+  const tampered = new URL(oembedHref!);
+  tampered.searchParams.set("url", created.url.replace(/token=[^&]+/, "token=" + "A".repeat(43)));
+  expect((await request.get(tampered.href)).status()).toBe(404);
+  expect((await request.get("/oembed?url=https://evil.example/d/x")).status()).toBe(404);
 });
