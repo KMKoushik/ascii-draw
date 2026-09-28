@@ -199,3 +199,18 @@ test("publishing is rate limited per client", async ({ request }) => {
   expect(status).toBe(429);
   expect((await request.post("/api/diagrams", { data: { spec: example } })).status()).toBe(201);
 });
+
+test("shared links unfurl as a large 1200×630 card with a description", async ({ request }) => {
+  const created = await publish(request);
+  const page = await (await request.get(created.url, { headers: { "User-Agent": "Slackbot-LinkExpanding 1.0" } })).text();
+  const meta = (name: string) => page.match(new RegExp(`(?:property|name)="${name}" content="([^"]*)"`))?.[1];
+  expect(meta("twitter:card")).toBe("summary_large_image");
+  expect(meta("og:image:width")).toBe("1200");
+  expect(meta("og:image:height")).toBe("630");
+  expect(meta("og:description")).toContain("4 boxes");
+  expect(meta("og:image:secure_url")).toBe(meta("og:image"));
+  const image = await request.get(meta("og:image")!.replaceAll("&amp;", "&"));
+  expect(image.headers()["content-type"]).toBe("image/png");
+  const bytes = await image.body();
+  expect([bytes.readUInt32BE(16), bytes.readUInt32BE(20)]).toEqual([1200, 630]);
+});
