@@ -17,6 +17,15 @@ async function connectV1(baseURL: string | undefined) {
 test("a 2025-era MCP client can learn, render, publish, reopen, and search", async ({ baseURL, request }) => {
   const client = await connectV1(baseURL);
   expect(client.getServerVersion()?.name).toBe("ascii-diagram");
+  const serverIcons = (client.getServerVersion() as { icons?: { src: string; mimeType: string }[] }).icons ?? [];
+  expect(serverIcons.map(icon => icon.mimeType)).toContain("image/png");
+  for (const icon of serverIcons) {
+    const response = await request.get(icon.src);
+    expect(response.status()).toBe(200);
+    expect(response.headers()["content-type"]).toBe(icon.mimeType);
+  }
+  const favicon = await request.get("/favicon.ico");
+  expect(favicon.headers()["content-type"]).toMatch(/icon/);
   expect(client.getInstructions()).toContain("render_diagram");
 
   const tools = await client.listTools();

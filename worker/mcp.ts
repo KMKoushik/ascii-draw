@@ -68,7 +68,13 @@ function parseLink(link: string) {
 
 function buildServer(env: Env, request: Request) {
   const origin = new URL(request.url).origin;
-  const server = new McpServer({ name: "ascii-diagram", title: "ascii-diagram", version: "1.0.0", websiteUrl: origin }, { instructions });
+  // Without our own icons, clients fall back to the parent domain's favicon.
+  const icons = [
+    { src: `${origin}/icon-512.png`, mimeType: "image/png", sizes: ["512x512"] },
+    { src: `${origin}/icon-192.png`, mimeType: "image/png", sizes: ["192x192"] },
+    { src: `${origin}/favicon.svg`, mimeType: "image/svg+xml", sizes: ["any"] },
+  ];
+  const server = new McpServer({ name: "ascii-diagram", title: "ascii-diagram", version: "1.0.0", websiteUrl: origin, icons }, { instructions });
 
   server.registerTool("diagram_guide", {
     title: "Diagram authoring guide",
