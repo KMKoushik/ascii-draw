@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "diagram-link",
+  "workers_dev": true,
+  "preview_urls": false,
+  "routes": [{ "pattern": "ascii-diagram.kdawg.dev", "custom_domain": true }],
+  "main": "worker/index.ts",
+  "account_id": "3271ef4cb6db5c4cc6a264a9774ee379",
+  "compatibility_date": "2026-09-28",
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "diagram-link",
+    "database_id": "e1528dd9-566b-4b67-aa22-0b0f9c592a09",
+    "migrations_dir": "migrations"
+  }],
+  "ratelimits": [{ "name": "PUBLISH_LIMITER", "namespace_id": "1001", "simple": { "limit": 30, "period": 60 } }],
+  "observability": { "enabled": false }
+}

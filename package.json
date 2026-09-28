@@ -1,0 +1,42 @@
+{
+  "name": "diagram-link",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "wrangler dev",
+    "deploy": "npm run build && wrangler deploy",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "db:local": "wrangler d1 migrations apply diagram-link --local",
+    "db:remote": "wrangler d1 migrations apply diagram-link --remote",
+    "sync:renderer": "node scripts/sync-renderer.mjs"
+  },
+  "dependencies": {
+    "@base-ui/react": "^1.0.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "tailwind-merge": "^3.4.0",
+    "zod": "^4.3.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "latest",
+    "@cloudflare/workers-types": "latest",
+    "@tailwindcss/vite": "^4.2.0",
+    "@tabler/icons": "3.46.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "latest",
+    "@playwright/test": "latest",
+    "tailwindcss": "^4.2.0",
+    "typescript": "^5.9.0",
+    "vite": "latest",
+    "vitest": "latest",
+    "wrangler": "4.142.0"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "canvas": { "width": 76, "height": 24 },
+  "texts": [
+    { "x": 2, "y": 0, "value": "A DIAGRAM. A LINK. DONE.", "color": "#e8e8e5" },
+    { "x": 2, "y": 2, "value": "From your agent to your browser.", "color": "#929da7" },
+    { "x": 2, "y": 21, "value": "JSON is the source. Your browser draws the rest.", "color": "#929da7" }
+  ],
+  "boxes": [
+    { "id": "agent", "x": 2, "y": 6, "width": 30, "height": 5, "title": "AGENT", "lines": ["Build a diagram"], "color": "#79bdff" },
+    { "id": "api", "x": 44, "y": 6, "width": 30, "height": 5, "title": "WORKER", "lines": ["Publish the JSON"], "color": "#79bdff" },
+    { "id": "browser", "x": 2, "y": 15, "width": 30, "height": 5, "title": "BROWSER", "lines": ["Render on demand"], "color": "#b7e3a1" },
+    { "id": "store", "x": 44, "y": 15, "width": 30, "height": 5, "title": "D1", "lines": ["Keep the source"], "color": "#ffd15b" }
+  ],
+  "icons": [
+    { "id": "agent", "x": 4, "y": 7, "width": 4, "height": 3, "color": "#79bdff" },
+    { "id": "outline/brand-cloudflare", "x": 46, "y": 7, "width": 4, "height": 3, "color": "#79bdff" },
+    { "id": "outline/browser", "x": 4, "y": 16, "width": 4, "height": 3, "color": "#b7e3a1" },
+    { "id": "datastore", "x": 46, "y": 16, "width": 4, "height": 3, "color": "#ffd15b" }
+  ],
+  "connectors": [
+    { "from": { "box": "agent", "port": "right" }, "to": { "box": "api", "port": "left" }, "color": "#79bdff" },
+    { "from": { "box": "api", "port": "bottom" }, "to": { "box": "store", "port": "top" }, "color": "#ffd15b" },
+    { "from": { "box": "store", "port": "left" }, "to": { "box": "browser", "port": "right" }, "color": "#b7e3a1" }
+  ],
+  "requiredLabels": ["AGENT", "WORKER", "D1", "BROWSER"],
+  "style": { "background": "#000000", "foreground": "#e8e8e5", "pointSize": 24, "lineSpacing": 2, "border": 32 }
+}
