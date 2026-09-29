@@ -5,6 +5,9 @@ import { oembed, previewImage, withPreviewTags } from "./og";
 
 export type { Env };
 const idPattern = "[a-f0-9-]{36}";
+const canonicalHost = "ascii.kdawg.dev";
+// Old domain: kept only so links shared before the move keep working.
+const legacyHosts = new Set(["ascii-diagram.kdawg.dev"]);
 const maxBodyBytes = 256 * 1024;
 const payloadSchema = z.object({
   title: z.string().trim().min(1).max(160).default("Untitled diagram"),
@@ -123,6 +126,11 @@ async function route(request: Request, env: Env, ctx: ExecutionContext) {
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const requestUrl = new URL(request.url);
+    if (legacyHosts.has(requestUrl.hostname)) {
+      requestUrl.hostname = canonicalHost;
+      return Response.redirect(requestUrl.href, 308);
+    }
     let response: Response;
     try { response = await route(request, env, ctx); }
     catch (error) {

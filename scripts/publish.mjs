@@ -8,7 +8,7 @@ if (!file || !title) {
 }
 const origin = process.env.DIAGRAM_LINK_ORIGIN;
 if (!origin) {
-  console.error("Set DIAGRAM_LINK_ORIGIN, e.g. https://ascii-diagram.kdawg.dev");
+  console.error("Set DIAGRAM_LINK_ORIGIN, e.g. https://ascii.kdawg.dev");
   process.exit(1);
 }
 try {

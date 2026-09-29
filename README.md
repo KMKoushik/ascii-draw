@@ -2,7 +2,7 @@
 
 Draw terminal-style ASCII diagrams and share them as links. Agents can publish them too.
 
-**Live:** https://ascii-diagram.kdawg.dev
+**Live:** https://ascii.kdawg.dev
 
 ## Use it
 
@@ -11,20 +11,20 @@ Draw terminal-style ASCII diagrams and share them as links. Agents can publish t
 **From an agent over MCP:**
 
 ```sh
-claude mcp add --transport http ascii-diagram https://ascii-diagram.kdawg.dev/mcp
+claude mcp add --transport http ascii-diagram https://ascii.kdawg.dev/mcp
 ```
 
-Other clients: add `https://ascii-diagram.kdawg.dev/mcp` as a remote HTTP MCP server, or use `npx mcp-remote <url>` for stdio-only clients.
+Other clients: add `https://ascii.kdawg.dev/mcp` as a remote HTTP MCP server, or use `npx mcp-remote <url>` for stdio-only clients.
 
 **Over HTTP:**
 
 ```sh
-curl https://ascii-diagram.kdawg.dev/api/diagrams \
+curl https://ascii.kdawg.dev/api/diagrams \
   -H 'Content-Type: application/json' \
   -d '{ "title": "System architecture", "spec": { ... } }'
 ```
 
-This returns the share `url`. See [/docs](https://ascii-diagram.kdawg.dev/docs) for the API and [/spec-format.md](https://ascii-diagram.kdawg.dev/spec-format.md) for the spec.
+This returns the share `url`. See [/docs](https://ascii.kdawg.dev/docs) for the API and [/spec-format.md](https://ascii.kdawg.dev/spec-format.md) for the spec.
 
 ## The skill
 

@@ -2,13 +2,13 @@
 
 ## Preferred: MCP
 
-If your client supports MCP, connect to `https://ascii-diagram.kdawg.dev/mcp` (Streamable HTTP, no auth). Call `diagram_guide`, draft a spec, check it with `render_diagram`, then `publish_diagram`, and give the user the returned url. To change an existing diagram, call `get_diagram`, edit the spec, render it, then `update_diagram` with the same link; the link stays the same.
+If your client supports MCP, connect to `https://ascii.kdawg.dev/mcp` (Streamable HTTP, no auth). Call `diagram_guide`, draft a spec, check it with `render_diagram`, then `publish_diagram`, and give the user the returned url. To change an existing diagram, call `get_diagram`, edit the spec, render it, then `update_diagram` with the same link; the link stays the same.
 
 ## HTTP API
 
 Create a JSON specification using the `ascii-diagram-png` skill format. Do not render or upload a PNG; the app renders in the viewer's browser.
 
-POST `https://ascii-diagram.kdawg.dev/api/diagrams` with:
+POST `https://ascii.kdawg.dev/api/diagrams` with:
 
 - `Content-Type: application/json`
 - Body: `{ "title": "Descriptive title", "spec": <the diagram JSON> }` (`title` is optional)
@@ -17,7 +17,7 @@ POST `https://ascii-diagram.kdawg.dev/api/diagrams` with:
 No auth is needed.
 
 ```sh
-curl https://ascii-diagram.kdawg.dev/api/diagrams \
+curl https://ascii.kdawg.dev/api/diagrams \
   -H "Content-Type: application/json" \
   -d "$(jq -n --arg title "System architecture" --slurpfile spec diagram.json '{title: $title, spec: $spec[0]}')"
 ```
@@ -31,7 +31,7 @@ On HTTP 422, fix the spec using the returned error and retry. On 429, wait a min
 To change a diagram you already shared, PUT the new spec to the same diagram with its token. The link stays the same and shows the new version. Anyone with the full link can do this.
 
 ```sh
-curl -X PUT "https://ascii-diagram.kdawg.dev/api/diagrams/<id>?token=<token>" \
+curl -X PUT "https://ascii.kdawg.dev/api/diagrams/<id>?token=<token>" \
   -H "Content-Type: application/json" \
   -d "$(jq -n --slurpfile spec diagram.json '{spec: $spec[0]}')"
 ```
