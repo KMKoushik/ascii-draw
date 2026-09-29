@@ -1,10 +1,9 @@
 // Extract the skill's exact character-grid engine. No layout algorithm is reimplemented.
 // The generated engine is committed, so builds and deployments do not need the skill.
 import { readFile, writeFile, mkdir, cp, readdir } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
-const skill = process.env.ASCII_SKILL_DIR ?? join(homedir(), ".agents/skills/ascii-diagram-png");
+const skill = process.env.ASCII_SKILL_DIR ?? "skills/ascii-diagram-png";
 const source = await readFile(join(skill, "scripts/render_ascii_diagram.mjs"), "utf8");
 const start = source.indexOf("const NORTH = 1;");
 const end = source.indexOf("function parseArguments(");

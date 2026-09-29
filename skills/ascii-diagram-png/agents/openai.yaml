@@ -1,0 +1,4 @@
+interface:
+  display_name: "ASCII Diagram PNG"
+  short_description: "Render aligned diagrams with terminal icon badges"
+  default_prompt: "Use $ascii-diagram-png and its infrastructure icon library to turn this architecture into aligned terminal-style box art and a PNG."

@@ -4,7 +4,29 @@ An agent-first, token-protected diagram publisher. Cloudflare Workers serves the
 
 Live app: https://ascii-diagram.kdawg.dev (also served at https://ascii.kdawg.dev)
 
-UI components are adapted from [ascii-cn](https://ascii-cn.kdawg.dev/). The grid engine is extracted from the local `ascii-diagram-png` skill with its original routing and collision checks.
+UI components are adapted from [ascii-cn](https://ascii-cn.kdawg.dev/). The grid engine is extracted from the [`ascii-diagram-png` skill](skills/ascii-diagram-png) with its original routing and collision checks.
+
+## Credits
+
+The `ascii-diagram-png` skill, including its character-grid engine, spec format, composition rules, and icon library, was created by [danny (@godwhoa)](https://github.com/godwhoa). This app is built on his work. The skill is included in [`skills/ascii-diagram-png`](skills/ascii-diagram-png) under the MIT license.
+
+## Install the skill
+
+The skill lets a coding agent write diagram specs and render them to PNG on your machine. Install it with the [skills CLI](https://github.com/vercel-labs/skills):
+
+```sh
+npx skills add KMKoushik/ascii-diagram
+```
+
+Or copy the folder into your agent's skills directory by hand:
+
+```sh
+git clone https://github.com/KMKoushik/ascii-diagram
+cp -R ascii-diagram/skills/ascii-diagram-png ~/.claude/skills/   # Claude Code
+cp -R ascii-diagram/skills/ascii-diagram-png ~/.agents/skills/   # Codex and other agents
+```
+
+Local PNG rendering needs Node, [ImageMagick](https://imagemagick.org) (`magick`), and `rsvg-convert` (librsvg) for SVG icons. On macOS: `brew install imagemagick librsvg`. You don't need the skill to publish a link; agents can call the API or MCP server below.
 
 ## Web flow
 
@@ -124,7 +146,7 @@ npx wrangler secret put PUBLISH_API_KEY
 npm run deploy
 ```
 
-`PUBLISH_API_KEY` is an operator-only admin key for rotate and revoke (for example, to take down a link). Use a random 32-byte or stronger value. This deployment's admin key is in `~/.config/diagram-link/credentials.env`. Secrets are never bundled into browser assets. Add a Workers custom domain in Cloudflare if desired; the default workers.dev URL also works.
+`PUBLISH_API_KEY` is an operator-only admin key for rotate and revoke (for example, to take down a link). Use a random 32-byte or stronger value. Secrets are never bundled into browser assets. Add a Workers custom domain in Cloudflare if desired; the default workers.dev URL also works.
 
 ## Access model
 
@@ -147,8 +169,12 @@ npm run deploy
 
 All 6,184 Tabler 3.46.0 outline and filled icons are served as static assets, with the original semantic shortcut vectors. PNGs are generated on demand and never stored. The plain text keeps compact icon marks; the PNG uses pictograms.
 
-`scripts/sync-renderer.mjs` regenerates the port and assets from `ASCII_SKILL_DIR` (defaults to `~/.agents/skills/ascii-diagram-png`). The generated engine, font, icons, and source reference are included, so normal builds need no locally installed skill. Review renderer updates before syncing. `scripts/install-ui.mjs` fetches the ascii-cn components used here and applies compact sizing/focus adaptations; normal builds use the checked-in components.
+`scripts/sync-renderer.mjs` regenerates the port and assets from `ASCII_SKILL_DIR` (defaults to the in-repo `skills/ascii-diagram-png`). To pick up a skill update, replace that folder, run `npm run sync:renderer`, and review the diff. The generated engine, font, icons, and source reference are committed, so normal builds don't run the sync. `scripts/install-ui.mjs` fetches the ascii-cn components used here and applies compact sizing/focus adaptations; normal builds use the checked-in components.
 
 Limits are intentional: 256 KiB request bodies, 600 × 300 cells, 500 boxes, 800 connectors, 300 icons, and point sizes 8–48. PNG export scales very large drawings down to 16 megapixels. The schema reports malformed input before grid allocation. Shortcuts and catalog IDs are allowlisted; diagram text is never interpreted as HTML or executable SVG.
 
 Font and icon license notices are in `public/licenses`. Keep the Tabler notice with distributed icon-bearing outputs.
+
+## License
+
+MIT. See [LICENSE](LICENSE). The `ascii-diagram-png` skill is MIT, copyright danny ([@godwhoa](https://github.com/godwhoa)); see [skills/ascii-diagram-png/LICENSE](skills/ascii-diagram-png/LICENSE). JetBrains Mono is under the SIL Open Font License and Tabler Icons under MIT; their notices are in `public/licenses`.

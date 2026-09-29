@@ -1,0 +1,678 @@
+{
+  "version": 1,
+  "cell": {
+    "width": 7,
+    "height": 3
+  },
+  "categories": [
+    {
+      "id": "compute",
+      "label": "Compute and agents",
+      "color": "#c084fc"
+    },
+    {
+      "id": "flow",
+      "label": "Flow and control",
+      "color": "#fbbf24"
+    },
+    {
+      "id": "storage",
+      "label": "Storage and artifacts",
+      "color": "#2dd4bf"
+    },
+    {
+      "id": "integration",
+      "label": "Integration",
+      "color": "#60a5fa"
+    },
+    {
+      "id": "observability",
+      "label": "Observe and verify",
+      "color": "#7bd88f"
+    }
+  ],
+  "icons": [
+    {
+      "id": "function",
+      "label": "Function",
+      "aliases": [
+        "lambda",
+        "fx",
+        "serverless-function"
+      ],
+      "category": "compute",
+      "mark": "ƒx",
+      "fallbackMark": "fx",
+      "art": [
+        "╭─────╮",
+        "│ ƒx  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "worker",
+      "label": "Worker",
+      "aliases": [
+        "job-runner",
+        "consumer",
+        "compute-worker"
+      ],
+      "category": "compute",
+      "mark": "⊛",
+      "fallbackMark": "W*",
+      "art": [
+        "╭─────╮",
+        "│  ⊛  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "agent",
+      "label": "Agent",
+      "aliases": [
+        "ai-agent",
+        "pi-agent",
+        "bot"
+      ],
+      "category": "compute",
+      "mark": "⍟",
+      "fallbackMark": "A*",
+      "art": [
+        "╭─────╮",
+        "│  ⍟  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "sandbox",
+      "label": "Sandbox",
+      "aliases": [
+        "container",
+        "vm",
+        "modal-sandbox"
+      ],
+      "category": "compute",
+      "mark": "⎕",
+      "fallbackMark": "[]",
+      "art": [
+        "╭─────╮",
+        "│  ⎕  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "workflow",
+      "label": "Workflow",
+      "aliases": [
+        "pipeline",
+        "orchestrator",
+        "dag"
+      ],
+      "category": "compute",
+      "mark": "WF",
+      "fallbackMark": "WF",
+      "art": [
+        "╭─────╮",
+        "│ WF  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "model",
+      "label": "Model",
+      "aliases": [
+        "llm",
+        "inference-model"
+      ],
+      "category": "compute",
+      "mark": "LLM",
+      "fallbackMark": "LLM",
+      "art": [
+        "╭─────╮",
+        "│ LLM │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "tool",
+      "label": "Tool",
+      "aliases": [
+        "tool-call",
+        "action"
+      ],
+      "category": "compute",
+      "mark": "+",
+      "fallbackMark": "+",
+      "art": [
+        "╭─────╮",
+        "│  +  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "prompt",
+      "label": "Prompt",
+      "aliases": [
+        "instruction",
+        "system-prompt"
+      ],
+      "category": "compute",
+      "mark": ">_",
+      "fallbackMark": ">_",
+      "art": [
+        "╭─────╮",
+        "│ >_  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "queue",
+      "label": "Queue",
+      "aliases": [
+        "job-queue",
+        "message-queue",
+        "sqs"
+      ],
+      "category": "flow",
+      "mark": "⋯▸",
+      "fallbackMark": "...>",
+      "art": [
+        "╭─────╮",
+        "│ ⋯▸  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "stream",
+      "label": "Stream",
+      "aliases": [
+        "event-stream",
+        "kinesis",
+        "kafka"
+      ],
+      "category": "flow",
+      "mark": "⤖",
+      "fallbackMark": ">>>",
+      "art": [
+        "╭─────╮",
+        "│  ⤖  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "event",
+      "label": "Event",
+      "aliases": [
+        "message",
+        "trigger"
+      ],
+      "category": "flow",
+      "mark": "✶",
+      "fallbackMark": "*",
+      "art": [
+        "╭─────╮",
+        "│  ✶  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "scheduler",
+      "label": "Scheduler",
+      "aliases": [
+        "cron",
+        "timer"
+      ],
+      "category": "flow",
+      "mark": "◔",
+      "fallbackMark": "T+",
+      "art": [
+        "╭─────╮",
+        "│  ◔  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "branch",
+      "label": "Branch",
+      "aliases": [
+        "route-split",
+        "fork",
+        "decision"
+      ],
+      "category": "flow",
+      "mark": "Y",
+      "fallbackMark": "Y",
+      "art": [
+        "╭─────╮",
+        "│  Y  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "retry",
+      "label": "Retry",
+      "aliases": [
+        "refresh",
+        "retry-loop"
+      ],
+      "category": "flow",
+      "mark": "↻",
+      "fallbackMark": "R+",
+      "art": [
+        "╭─────╮",
+        "│  ↻  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "smoke-test",
+      "label": "Smoke test",
+      "aliases": [
+        "health-check",
+        "validation"
+      ],
+      "category": "flow",
+      "mark": "✓",
+      "fallbackMark": "OK",
+      "art": [
+        "╭─────╮",
+        "│  ✓  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "publish",
+      "label": "Publish",
+      "aliases": [
+        "upload",
+        "release"
+      ],
+      "category": "flow",
+      "mark": "↑",
+      "fallbackMark": "UP",
+      "art": [
+        "╭─────╮",
+        "│  ↑  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "datastore",
+      "label": "Datastore",
+      "aliases": [
+        "database",
+        "db",
+        "sql"
+      ],
+      "category": "storage",
+      "mark": "⌸",
+      "fallbackMark": "DB",
+      "art": [
+        "╭─────╮",
+        "│  ⌸  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "object-store",
+      "label": "Object store",
+      "aliases": [
+        "blob-store",
+        "bucket",
+        "s3",
+        "aws-s3"
+      ],
+      "category": "storage",
+      "mark": "⌺",
+      "fallbackMark": "OBJ",
+      "art": [
+        "╭─────╮",
+        "│  ⌺  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "cache",
+      "label": "Cache",
+      "aliases": [
+        "redis",
+        "memory-store"
+      ],
+      "category": "storage",
+      "mark": "RAM",
+      "fallbackMark": "RAM",
+      "art": [
+        "╭─────╮",
+        "│ RAM │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "snapshot",
+      "label": "Snapshot",
+      "aliases": [
+        "image",
+        "checkpoint",
+        "sandbox-snapshot"
+      ],
+      "category": "storage",
+      "mark": "⊡",
+      "fallbackMark": "[.]",
+      "art": [
+        "╭─────╮",
+        "│  ⊡  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "repository",
+      "label": "Repository",
+      "aliases": [
+        "repo",
+        "source-code"
+      ],
+      "category": "storage",
+      "mark": "GIT",
+      "fallbackMark": "GIT",
+      "art": [
+        "╭─────╮",
+        "│ GIT │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "artifact",
+      "label": "Artifact",
+      "aliases": [
+        "build-artifact",
+        "package"
+      ],
+      "category": "storage",
+      "mark": "PKG",
+      "fallbackMark": "PKG",
+      "art": [
+        "╭─────╮",
+        "│ PKG │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "harness",
+      "label": "Harness",
+      "aliases": [
+        "runnable-harness",
+        "agent-harness"
+      ],
+      "category": "storage",
+      "mark": "{}",
+      "fallbackMark": "{}",
+      "art": [
+        "╭─────╮",
+        "│ {}  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "install",
+      "label": "Install",
+      "aliases": [
+        "setup",
+        "bootstrap"
+      ],
+      "category": "storage",
+      "mark": "IN",
+      "fallbackMark": "IN",
+      "art": [
+        "╭─────╮",
+        "│ IN  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "api",
+      "label": "API",
+      "aliases": [
+        "endpoint",
+        "service-api",
+        "http-api"
+      ],
+      "category": "integration",
+      "mark": "API",
+      "fallbackMark": "API",
+      "art": [
+        "╭─────╮",
+        "│ API │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "bridge",
+      "label": "Bridge",
+      "aliases": [
+        "tool-bridge",
+        "gateway"
+      ],
+      "category": "integration",
+      "mark": "⟷",
+      "fallbackMark": "<->",
+      "art": [
+        "╭─────╮",
+        "│  ⟷  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "proxy",
+      "label": "Proxy",
+      "aliases": [
+        "tool-proxy",
+        "side-effect-proxy"
+      ],
+      "category": "integration",
+      "mark": "⇄",
+      "fallbackMark": "PXY",
+      "art": [
+        "╭─────╮",
+        "│  ⇄  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "webhook",
+      "label": "Webhook",
+      "aliases": [
+        "hook",
+        "callback"
+      ],
+      "category": "integration",
+      "mark": "WH",
+      "fallbackMark": "WH",
+      "art": [
+        "╭─────╮",
+        "│ WH  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "git-push",
+      "label": "GitHub push",
+      "aliases": [
+        "github-push",
+        "source-event"
+      ],
+      "category": "integration",
+      "mark": "GH",
+      "fallbackMark": "GH",
+      "art": [
+        "╭─────╮",
+        "│ GH  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "pull-request",
+      "label": "Pull request",
+      "aliases": [
+        "pr",
+        "github-pr"
+      ],
+      "category": "integration",
+      "mark": "PR",
+      "fallbackMark": "PR",
+      "art": [
+        "╭─────╮",
+        "│ PR  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "secret",
+      "label": "Secret",
+      "aliases": [
+        "credential",
+        "token",
+        "key"
+      ],
+      "category": "integration",
+      "mark": "KEY",
+      "fallbackMark": "KEY",
+      "art": [
+        "╭─────╮",
+        "│ KEY │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "trace",
+      "label": "Trace",
+      "aliases": [
+        "telemetry",
+        "span",
+        "live-trace"
+      ],
+      "category": "observability",
+      "mark": "o-o",
+      "fallbackMark": "o-o",
+      "art": [
+        "╭─────╮",
+        "│ o-o │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "replay",
+      "label": "Replay",
+      "aliases": [
+        "rerun",
+        "trace-replay"
+      ],
+      "category": "observability",
+      "mark": "⎋",
+      "fallbackMark": "<-",
+      "art": [
+        "╭─────╮",
+        "│  ⎋  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "logs",
+      "label": "Logs",
+      "aliases": [
+        "log",
+        "logging"
+      ],
+      "category": "observability",
+      "mark": "LOG",
+      "fallbackMark": "LOG",
+      "art": [
+        "╭─────╮",
+        "│ LOG │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "metrics",
+      "label": "Metrics",
+      "aliases": [
+        "metric",
+        "chart"
+      ],
+      "category": "observability",
+      "mark": "∿",
+      "fallbackMark": "~",
+      "art": [
+        "╭─────╮",
+        "│  ∿  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "alert",
+      "label": "Alert",
+      "aliases": [
+        "warning",
+        "incident"
+      ],
+      "category": "observability",
+      "mark": "!",
+      "fallbackMark": "!",
+      "art": [
+        "╭─────╮",
+        "│  !  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "success",
+      "label": "Success",
+      "aliases": [
+        "pass",
+        "passed",
+        "ready"
+      ],
+      "category": "observability",
+      "mark": "OK+",
+      "fallbackMark": "OK+",
+      "art": [
+        "╭─────╮",
+        "│ OK+ │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "failure",
+      "label": "Failure",
+      "aliases": [
+        "fail",
+        "failed",
+        "error"
+      ],
+      "category": "observability",
+      "mark": "×",
+      "fallbackMark": "X",
+      "art": [
+        "╭─────╮",
+        "│  ×  │",
+        "╰─────╯"
+      ]
+    },
+    {
+      "id": "evaluation",
+      "label": "Evaluation",
+      "aliases": [
+        "eval",
+        "evaluator",
+        "test"
+      ],
+      "category": "observability",
+      "mark": "EVAL",
+      "fallbackMark": "EVAL",
+      "art": [
+        "╭─────╮",
+        "│EVAL │",
+        "╰─────╯"
+      ]
+    }
+  ]
+}
