@@ -1,4 +1,4 @@
-# ascii-diagram
+# ascii-draw
 
 Draw terminal-style ASCII diagrams and share them as links. Agents can publish them too.
 
@@ -31,7 +31,7 @@ This returns the share `url`. See [/docs](https://ascii.kdawg.dev/docs) for the 
 [`skills/ascii-diagram-png`](skills/ascii-diagram-png) lets a coding agent write diagrams and render them to PNG locally:
 
 ```sh
-npx skills add KMKoushik/ascii-diagram
+npx skills add KMKoushik/ascii-draw
 ```
 
 You can also copy the folder into `~/.claude/skills/` or `~/.agents/skills/`. Rendering needs ImageMagick and librsvg (`brew install imagemagick librsvg`).
