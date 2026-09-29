@@ -2,9 +2,9 @@
 
 An agent-first, token-protected diagram publisher. Cloudflare Workers serves the API and React app; D1 stores canonical JSON and hashed access tokens. The browser draws the PNG. No R2, KV, image service, or external runtime is needed.
 
-Live app: https://ascii-diagram.kdawg.dev
+Live app: https://ascii-diagram.kdawg.dev (also served at https://ascii.kdawg.dev)
 
-UI components are adapted from [ascii-cn](https://ascii.kdawg.dev/). The grid engine is extracted from the local `ascii-diagram-png` skill with its original routing and collision checks.
+UI components are adapted from [ascii-cn](https://ascii-cn.kdawg.dev/). The grid engine is extracted from the local `ascii-diagram-png` skill with its original routing and collision checks.
 
 ## Web flow
 

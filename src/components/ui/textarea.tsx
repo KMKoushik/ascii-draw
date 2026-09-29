@@ -1,4 +1,4 @@
-// Adapted from https://ascii.kdawg.dev/r/textarea.json
+// Adapted from https://ascii-cn.kdawg.dev/r/textarea.json
 import type { ComponentProps } from "react";
 export function Textarea({
   className = "",

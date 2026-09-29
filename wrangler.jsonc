@@ -3,7 +3,10 @@
   "name": "diagram-link",
   "workers_dev": true,
   "preview_urls": false,
-  "routes": [{ "pattern": "ascii-diagram.kdawg.dev", "custom_domain": true }],
+  "routes": [
+    { "pattern": "ascii-diagram.kdawg.dev", "custom_domain": true },
+    { "pattern": "ascii.kdawg.dev", "custom_domain": true }
+  ],
   "main": "worker/index.ts",
   "account_id": "3271ef4cb6db5c4cc6a264a9774ee379",
   "compatibility_date": "2026-09-28",

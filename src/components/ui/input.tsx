@@ -1,4 +1,4 @@
-// Adapted from https://ascii.kdawg.dev/r/input.json
+// Adapted from https://ascii-cn.kdawg.dev/r/input.json
 import type { ComponentProps } from "react";
 export function Input({ className = "", ...props }: ComponentProps<"input">) {
   return (

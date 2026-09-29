@@ -1,4 +1,4 @@
-// Adapted from https://ascii.kdawg.dev/r/panel.json
+// Adapted from https://ascii-cn.kdawg.dev/r/panel.json
 import type { ComponentProps, ReactNode } from "react";
 export function Panel({
   title,

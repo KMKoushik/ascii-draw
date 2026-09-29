@@ -1,4 +1,4 @@
-// Adapted from https://ascii.kdawg.dev/r/button.json
+// Adapted from https://ascii-cn.kdawg.dev/r/button.json
 import { Button as ButtonPrimitive } from "@base-ui/react/button";
 import { cva, type VariantProps } from "class-variance-authority";
 
